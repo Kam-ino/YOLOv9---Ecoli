@@ -1,0 +1,474 @@
+"""
+backend/app/main.py
+===================
+FastAPI app — routes plus optional static frontend serving.
+
+Run from the repo root:
+
+    uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
+
+Endpoints:
+    GET    /api/health                       model + device info
+    POST   /api/predict                      multipart image → detections JSON
+    GET    /api/stream                       MJPEG live stream
+    POST   /api/snapshot                     one-shot JPEG capture from a source
+    GET    /api/label-classes                labelling vocabulary
+    POST   /api/dataset/save                 save image + boxes (YOLO format)
+    GET    /api/dataset/list                 list saved entries
+    GET    /api/dataset/stats                per-split counts
+    GET    /api/dataset/image/{split}/{name} serve a stored image
+    DELETE /api/dataset/{split}/{name}       remove an entry
+    /*                                       (prod) built React app
+"""
+import json
+import logging
+import os
+import time
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Iterator, List, Optional, Union
+
+import cv2
+import numpy as np
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
+
+from src.capture import CaptureError, VideoSource
+from src.logging_setup import setup_logging
+from src.preprocessing import apply_clahe
+from src.visualization import draw_detections, draw_hud
+
+from .dataset import VALID_SPLITS, get_store, init_store, load_label_classes
+from .detector import service
+from .schemas import (
+    DatasetEntry, DatasetEntryWithBoxes, DatasetStats, DetectionDTO,
+    HealthResponse, LabelBox, PredictResponse,
+)
+
+
+log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Lifespan: load the model once at startup so the first request is fast.
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    config_path = os.environ.get("ECOLI_CONFIG", "config.yaml")
+    setup_logging(os.environ.get("ECOLI_LOG_LEVEL", "INFO"))
+    log.info("Lifespan startup — config=%s", config_path)
+    service.init(config_path)
+    # Dataset root is fixed at data/ecoli/ so the layout matches
+    # training/dataset.yaml.example out of the box. Override via env var
+    # if you want a different location.
+    dataset_root = Path(os.environ.get("ECOLI_DATASET_ROOT", "data/ecoli"))
+    init_store(dataset_root)
+    yield
+    log.info("Lifespan shutdown.")
+
+
+# ---------------------------------------------------------------------------
+# Image decoding (with Pillow fallback for tricky PNGs)
+# ---------------------------------------------------------------------------
+
+def _decode_image_bytes(contents: bytes, filename: str = "") -> Optional[np.ndarray]:
+    """Decode arbitrary image bytes to a BGR ``np.ndarray``.
+
+    ``cv2.imdecode`` is fast on common JPEG / PNG / BMP but refuses
+    PNGs in less-common modes (16-bit, palette, embedded ICC profile,
+    progressive variants). Pillow is far more permissive, so when
+    OpenCV returns ``None`` we try Pillow → convert("RGB") → ndarray.
+    Returns ``None`` only when both decoders fail.
+    """
+    arr = np.frombuffer(contents, dtype=np.uint8)
+    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if frame is not None:
+        return frame
+    try:
+        import io
+        from PIL import Image  # transitive dep via ultralytics
+        with Image.open(io.BytesIO(contents)) as img:
+            rgb = img.convert("RGB")
+            arr_rgb = np.array(rgb)
+        return cv2.cvtColor(arr_rgb, cv2.COLOR_RGB2BGR)
+    except Exception as exc:
+        log.warning("Pillow fallback failed for %r: %s", filename, exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# App factory
+# ---------------------------------------------------------------------------
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="E. coli Detection API",
+        version="0.1.0",
+        lifespan=lifespan,
+    )
+
+    # During `vite dev`, the frontend is served from localhost:5173 and needs
+    # cross-origin access. In production it's served from the same FastAPI
+    # process via StaticFiles, so CORS is a no-op there.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3003",
+            "http://127.0.0.1:3003",
+        ],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # -- /api/health ---------------------------------------------------------
+
+    @app.get("/api/health", response_model=HealthResponse)
+    def health() -> HealthResponse:
+        if not service.is_ready:
+            return HealthResponse(
+                status="initializing",
+                model_loaded=False,
+                device="?",
+                classes=[],
+            )
+        return HealthResponse(
+            status="ok",
+            model_loaded=True,
+            device=service.detector.device,
+            classes=service.detector.class_names,
+        )
+
+    # -- /api/predict --------------------------------------------------------
+
+    @app.post("/api/predict", response_model=PredictResponse)
+    async def predict(file: UploadFile = File(...)) -> PredictResponse:
+        if not service.is_ready:
+            raise HTTPException(status_code=503, detail="Detector not initialised.")
+
+        contents = await file.read()
+        if not contents:
+            raise HTTPException(status_code=400, detail="Empty upload.")
+
+        frame = _decode_image_bytes(contents, file.filename or "")
+        if frame is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not decode image from upload: {file.filename!r}.",
+            )
+
+        cfg = service.config
+        if cfg.preprocessing.apply_clahe:
+            frame = apply_clahe(
+                frame,
+                clip_limit=cfg.preprocessing.clahe_clip_limit,
+                tile_grid_size=cfg.preprocessing.clahe_tile_grid_size,
+            )
+
+        h, w = frame.shape[:2]
+        with service.lock:
+            t0 = time.perf_counter()
+            dets = service.detector.predict(frame)
+            inference_ms = (time.perf_counter() - t0) * 1000.0
+
+        return PredictResponse(
+            detections=[
+                DetectionDTO(
+                    bbox=d.bbox,
+                    class_id=d.class_id,
+                    class_name=d.class_name,
+                    confidence=d.confidence,
+                )
+                for d in dets
+            ],
+            image_size=(w, h),
+            inference_ms=inference_ms,
+        )
+
+    # -- /api/stream ---------------------------------------------------------
+
+    @app.get("/api/stream")
+    def stream(
+        source: str = Query("0", description="Device index, file path, or rtsp URL."),
+        annotate: bool = Query(True, description="Run inference and draw boxes."),
+        infer_every: int = Query(
+            1, ge=1, le=30,
+            description="Run inference once every N frames; reuse last boxes "
+                        "for intermediate frames. Trades box freshness for FPS.",
+        ),
+    ) -> StreamingResponse:
+        if not service.is_ready:
+            raise HTTPException(status_code=503, detail="Detector not initialised.")
+
+        # Source param: numeric string → device index; otherwise treat as path/URL.
+        src_val: Union[int, str]
+        try:
+            src_val = int(source)
+        except ValueError:
+            src_val = source
+
+        return StreamingResponse(
+            _mjpeg_generator(src_val, annotate=annotate, infer_every=infer_every),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+        )
+
+    # -- /api/snapshot -------------------------------------------------------
+
+    @app.post("/api/snapshot")
+    def snapshot(source: str = Query("0")) -> Response:
+        """Open the source, grab one frame, return as JPEG.
+
+        Useful for labelling: gives a static still you can draw boxes on.
+        The configured capture.width/height/fps from config.yaml apply.
+        Returns 503 if the device is busy (e.g. /api/stream is already
+        holding it) or fails to read.
+        """
+        if not service.is_ready:
+            raise HTTPException(status_code=503, detail="Detector not initialised.")
+
+        src_val: Union[int, str]
+        try:
+            src_val = int(source)
+        except ValueError:
+            src_val = source
+
+        cfg = service.config
+        try:
+            with VideoSource(
+                src_val, cfg.capture.width, cfg.capture.height, cfg.capture.fps,
+            ) as cap:
+                # Some USB cams need a couple of frames to settle auto-exposure
+                # / white balance before the first usable frame arrives.
+                frame = None
+                for _ in range(4):
+                    ok, frame = cap.read()
+                    if ok and frame is not None:
+                        pass  # keep reading to let exposure converge
+        except CaptureError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        if frame is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Could not read a frame from the source.",
+            )
+
+        ok, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        if not ok:
+            raise HTTPException(status_code=500, detail="Could not encode JPEG.")
+        return Response(content=jpg.tobytes(), media_type="image/jpeg")
+
+    # -- /api/label-classes --------------------------------------------------
+
+    @app.get("/api/label-classes")
+    def label_classes() -> dict:
+        return {"classes": load_label_classes()}
+
+    # -- /api/dataset/* ------------------------------------------------------
+
+    @app.post("/api/dataset/save", response_model=DatasetEntry)
+    async def dataset_save(
+        file: UploadFile = File(...),
+        boxes: str = Form("[]", description="JSON list of LabelBox dicts."),
+        split: str = Form("train"),
+        filename: Optional[str] = Form(None),
+    ) -> DatasetEntry:
+        if split not in VALID_SPLITS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"split must be one of {list(VALID_SPLITS)}, got {split!r}.",
+            )
+
+        try:
+            raw_boxes = json.loads(boxes)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid boxes JSON: {exc}",
+            ) from exc
+        if not isinstance(raw_boxes, list):
+            raise HTTPException(
+                status_code=400, detail="boxes must be a JSON array.",
+            )
+        try:
+            box_objs: List[LabelBox] = [LabelBox(**b) for b in raw_boxes]
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=exc.errors()) from exc
+
+        image_bytes = await file.read()
+        if not image_bytes:
+            raise HTTPException(status_code=400, detail="Empty image upload.")
+
+        if not filename:
+            # Derive an extension from the upload; default to .jpg for
+            # snapshots (which come in without a filename hint).
+            ext = (Path(file.filename or "").suffix or ".jpg").lower()
+            if ext not in (".jpg", ".jpeg", ".png"):
+                ext = ".jpg"
+            filename = f"img_{int(time.time() * 1000)}{ext}"
+
+        try:
+            return get_store().save(image_bytes, box_objs, split, filename)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/dataset/find", response_model=DatasetEntryWithBoxes)
+    def dataset_find(
+        filename: str = Query(..., description="Image filename to locate."),
+    ) -> DatasetEntryWithBoxes:
+        """Locate an existing entry by filename across all splits.
+
+        Used by the Label UI on upload: if the user re-opens an image
+        we've already labelled, this returns the existing box list so
+        they can extend it rather than start over.
+        """
+        result = get_store().find_entry(filename)
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No saved entry with filename {filename!r}.",
+            )
+        entry, boxes = result
+        return DatasetEntryWithBoxes(entry=entry, boxes=boxes)
+
+    @app.get("/api/dataset/list", response_model=List[DatasetEntry])
+    def dataset_list(split: Optional[str] = Query(None)) -> List[DatasetEntry]:
+        return get_store().list_entries(split)
+
+    @app.get("/api/dataset/stats", response_model=DatasetStats)
+    def dataset_stats() -> DatasetStats:
+        return get_store().stats()
+
+    @app.get("/api/dataset/image/{split}/{filename}")
+    def dataset_image(split: str, filename: str) -> FileResponse:
+        if split not in VALID_SPLITS:
+            raise HTTPException(status_code=404, detail="Unknown split.")
+        try:
+            path = get_store().get_image_path(filename, split)
+        except (ValueError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return FileResponse(str(path))
+
+    @app.delete("/api/dataset/{split}/{filename}")
+    def dataset_delete(split: str, filename: str) -> dict:
+        if split not in VALID_SPLITS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"split must be one of {list(VALID_SPLITS)}.",
+            )
+        try:
+            get_store().delete(filename, split)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"deleted": True}
+
+    # -- Built React app (production) ---------------------------------------
+    # Mount LAST so /api/* takes precedence over the catch-all.
+    static_dir = Path(__file__).parent / "static"
+    if static_dir.exists():
+        app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
+        log.info("Serving built frontend from %s", static_dir)
+    else:
+        log.info("No %s — running API-only (use `vite dev` for the frontend).",
+                 static_dir)
+
+    return app
+
+
+# ---------------------------------------------------------------------------
+# MJPEG generator
+# ---------------------------------------------------------------------------
+
+# After this many failed reads in a row, end the stream rather than
+# spinning indefinitely on a disconnected device or a file that
+# finished.
+_MAX_CONSECUTIVE_READ_FAILURES = 30
+
+
+def _mjpeg_generator(
+    source: Union[int, str],
+    annotate: bool,
+    infer_every: int = 1,
+) -> Iterator[bytes]:
+    """Yield multipart/MJPEG frames; optionally annotate each frame in-process.
+
+    When ``infer_every > 1``, inference runs once every N frames and the
+    last detection list is re-drawn on the intermediate frames. On a
+    CPU-bound host this is the single biggest knob for live FPS — the
+    boxes are slightly stale but visually convincing while the source
+    framerate is preserved.
+    """
+    cfg = service.config
+    fps_window: list[float] = []
+    consecutive_failures = 0
+    last_dets: list = []          # most recent detection list, drawn on skip frames
+    frame_idx = 0
+
+    try:
+        with VideoSource(
+            source,
+            cfg.capture.width,
+            cfg.capture.height,
+            cfg.capture.fps,
+        ) as cap:
+            while True:
+                t0 = time.perf_counter()
+                ok, frame = cap.read()
+                if not ok or frame is None:
+                    consecutive_failures += 1
+                    if consecutive_failures >= _MAX_CONSECUTIVE_READ_FAILURES:
+                        log.info("Stream ending: %d consecutive read failures.",
+                                 consecutive_failures)
+                        break
+                    continue
+                consecutive_failures = 0
+                frame_idx += 1
+
+                if cfg.preprocessing.apply_clahe:
+                    frame = apply_clahe(
+                        frame,
+                        clip_limit=cfg.preprocessing.clahe_clip_limit,
+                        tile_grid_size=cfg.preprocessing.clahe_tile_grid_size,
+                    )
+
+                if annotate:
+                    # Only run inference on every Nth frame; reuse last
+                    # boxes in between. The lock is only held while we
+                    # actually call the model.
+                    if (frame_idx - 1) % infer_every == 0:
+                        with service.lock:
+                            last_dets = service.detector.predict(frame)
+                    draw_detections(frame, last_dets)
+                    dt = time.perf_counter() - t0
+                    if dt > 0:
+                        fps_window.append(1.0 / dt)
+                        if len(fps_window) > 30:
+                            fps_window.pop(0)
+                    fps = sum(fps_window) / len(fps_window) if fps_window else 0.0
+                    draw_hud(frame, fps=fps, detection_count=len(last_dets))
+
+                # JPEG quality 80 is the typical MJPEG tradeoff — visibly
+                # lossless on most content, ~3x smaller than 95.
+                ok, jpg = cv2.imencode(
+                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80]
+                )
+                if not ok:
+                    continue
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n"
+                    + jpg.tobytes()
+                    + b"\r\n"
+                )
+    except CaptureError as exc:
+        # The generator can't raise HTTP errors after headers are sent;
+        # the browser will see the connection close.
+        log.error("Stream capture failed: %s", exc)
+
+
+# Module-level app for `uvicorn backend.app.main:app`.
+app = create_app()

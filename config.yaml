@@ -1,0 +1,46 @@
+# Application configuration for live E. coli detection.
+# Edit this file (or copy it and pass --config) to tune runtime behaviour.
+
+model:
+  # Path to YOLOv9 weights. .pt or .onnx are both supported transparently
+  # by the Ultralytics loader. The repo does not ship trained weights —
+  # fine-tune your own (see README / training/train.py) and place them here.
+  weights: models/ecoli_yolov9c.pt
+
+  # Device selection. "auto" picks CUDA if available, otherwise CPU.
+  device: auto              # auto | cuda | cuda:0 | cpu
+
+  # Inference resolution. MUST be a multiple of 32. Lower = faster, lower mAP.
+  imgsz: 640
+
+  # Filter detections below this confidence before drawing/returning.
+  conf_threshold: 0.25
+
+  # Non-max-suppression IoU threshold. Lower = stricter de-duplication.
+  iou_threshold: 0.45
+
+capture:
+  # USB device index (int), file path (str), or rtsp:// URL (str).
+  source: 0
+  width: 1280
+  height: 720
+  fps: 30
+
+preprocessing:
+  # CLAHE drastically helps on low-contrast / unevenly lit microscopy.
+  # Disable if your samples are already well-lit and high-contrast.
+  apply_clahe: true
+  clahe_clip_limit: 2.0
+  clahe_tile_grid_size: 8
+
+# Class names. Index order matters and must match the trained model.
+classes:
+  - ecoli
+
+logging:
+  level: INFO               # DEBUG | INFO | WARNING | ERROR
+  file: logs/app.log        # Empty string disables file logging.
+
+output:
+  save_video: false         # CLI --save also enables per-run recording.
+  output_dir: outputs

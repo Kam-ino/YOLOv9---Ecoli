@@ -1,0 +1,30 @@
+# --- Core ML / vision ---
+# torch >=2.2 supports YOLOv9 architectures used by Ultralytics 8.3+.
+# For CUDA, install the matching PyTorch build from pytorch.org BEFORE
+# running `pip install -r requirements.txt`, otherwise pip will pick a
+# CPU-only wheel on some platforms.
+torch>=2.2.0
+torchvision>=0.17.0
+ultralytics>=8.3.0
+opencv-python>=4.9.0
+numpy>=1.24.0
+
+# --- Config / utils ---
+PyYAML>=6.0
+
+# --- Web backend ---
+# FastAPI + uvicorn serve the React frontend and expose the /api/* endpoints
+# used for image upload, live MJPEG streaming, and health checks.
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.9
+
+# --- Optional but recommended ---
+# Picked up automatically by Ultralytics for richer training-time augmentation.
+albumentations>=1.4.0
+
+# --- Optional: pure-ONNX inference path ---
+# Ultralytics already loads .onnx via YOLO(...), but installing onnxruntime
+# explicitly enables the lightweight ONNX-only deployment path (e.g. on a Pi
+# or any host where you don't want PyTorch installed).
+onnxruntime>=1.17.0
