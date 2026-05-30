@@ -30,8 +30,9 @@ VALID_SPLITS = ("train", "val", "test")
 
 # Filenames are quoted into URLs and path-joined onto disk, so restrict
 # hard to a safe character set. The Label UI generates timestamps that
-# satisfy this; user-uploaded names are sanitised by the route.
-_FILENAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+# satisfy this; user-uploaded names are sanitised by the route. Spaces
+# are permitted so the " - N" collision suffix produces readable names.
+_FILENAME_RE = re.compile(r"^[A-Za-z0-9 ._-]+$")
 
 
 class DatasetStore:
@@ -47,11 +48,40 @@ class DatasetStore:
             raise ValueError(f"Invalid split: {split!r}")
         if not _FILENAME_RE.match(filename):
             raise ValueError(
-                f"Invalid filename: {filename!r} (allowed: A-Z a-z 0-9 . _ -)"
+                f"Invalid filename: {filename!r} "
+                f"(allowed: A-Z a-z 0-9 . _ - and space)"
             )
         image_path = self.root / "images" / split / filename
         label_path = self.root / "labels" / split / (Path(filename).stem + ".txt")
         return image_path, label_path
+
+    def _exists_in_any_split(self, filename: str) -> bool:
+        return any(
+            (self.root / "images" / s / filename).exists() for s in VALID_SPLITS
+        )
+
+    def unique_filename(self, filename: str) -> str:
+        """Return ``filename`` unchanged if free, else append ' - N' before
+        the extension. Scans across all splits so the same name can't
+        appear in train/val/test simultaneously and confuse the user.
+
+        ``ecoli.png`` → first free of ``ecoli - 1.png`` → ``ecoli - 2.png`` → …
+
+        We iterate from 1 (re-using gaps left by deletes) rather than
+        max+1, which keeps numbers small in normal use.
+        """
+        if not self._exists_in_any_split(filename):
+            return filename
+        stem = Path(filename).stem
+        suffix = Path(filename).suffix
+        n = 1
+        # No upper bound — at 1 collision/ms this loop is fine even for
+        # millions of entries. In practice it terminates almost immediately.
+        while True:
+            candidate = f"{stem} - {n}{suffix}"
+            if not self._exists_in_any_split(candidate):
+                return candidate
+            n += 1
 
     # -- write ---------------------------------------------------------------
 
@@ -62,7 +92,23 @@ class DatasetStore:
         split: str,
         filename: str,
     ) -> DatasetEntry:
-        image_path, label_path = self._resolve(filename, split)
+        # Validate first, then auto-rename on collision so we never
+        # silently overwrite a previously-labelled image.
+        if split not in VALID_SPLITS:
+            raise ValueError(f"Invalid split: {split!r}")
+        if not _FILENAME_RE.match(filename):
+            raise ValueError(
+                f"Invalid filename: {filename!r} "
+                f"(allowed: A-Z a-z 0-9 . _ - and space)"
+            )
+        final_name = self.unique_filename(filename)
+        if final_name != filename:
+            log.info(
+                "Filename collision on %s — saving as %s instead.",
+                filename, final_name,
+            )
+
+        image_path, label_path = self._resolve(final_name, split)
         image_path.parent.mkdir(parents=True, exist_ok=True)
         label_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -78,12 +124,12 @@ class DatasetStore:
         )
 
         log.info(
-            "Saved %s with %d box(es) to split=%s", filename, len(boxes), split,
+            "Saved %s with %d box(es) to split=%s", final_name, len(boxes), split,
         )
         return DatasetEntry(
-            filename=filename,
+            filename=final_name,
             split=split,
-            image_url=f"/api/dataset/image/{split}/{filename}",
+            image_url=f"/api/dataset/image/{split}/{final_name}",
             num_boxes=len(boxes),
             created_at=image_path.stat().st_mtime,
         )

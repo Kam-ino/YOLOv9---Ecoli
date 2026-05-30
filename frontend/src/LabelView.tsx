@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   SPLITS,
   colorForClass,
@@ -6,7 +6,6 @@ import {
   fetchDatasetList,
   fetchDatasetStats,
   fetchLabelClasses,
-  findDatasetEntry,
   saveDatasetEntry,
   snapshotImage,
   type DatasetEntry,
@@ -15,6 +14,7 @@ import {
   type Split,
 } from './api'
 import LabelCanvas from './LabelCanvas'
+import TrainPanel from './TrainPanel'
 
 type SourceMode = 'upload' | 'snapshot'
 
@@ -40,6 +40,13 @@ export default function LabelView() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+
+  // Native <input type="file"> is uncontrolled — clearing component
+  // state doesn't reset the "ecoli.png" label. Hold a ref so we can
+  // also reset .value when the user clicks "New image" (and as a bonus,
+  // this lets them re-pick the same file, which the input otherwise
+  // ignores because onChange doesn't fire for the same selection).
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ---- bootstrap ----------------------------------------------------------
   useEffect(() => {
@@ -73,27 +80,7 @@ export default function LabelView() {
   )
 
   const onPickFile = useCallback(
-    async (f: File) => {
-      setSource(f, f.name)
-      // Cross-session continuity: if we've already labelled an image
-      // with this filename, pull back its boxes so the user can extend
-      // them rather than start over.
-      try {
-        const existing = await findDatasetEntry(f.name)
-        if (existing) {
-          setBoxes(existing.boxes)
-          setSplit(existing.entry.split as Split)
-          setMessage(
-            `Loaded ${existing.boxes.length} existing box${
-              existing.boxes.length === 1 ? '' : 'es'
-            } from ${existing.entry.split}/${existing.entry.filename}. ` +
-            `Add more boxes and click Save again.`,
-          )
-        }
-      } catch {
-        // Lookup is best-effort — fall through to an empty canvas.
-      }
-    },
+    (f: File) => setSource(f, f.name),
     [setSource],
   )
 
@@ -120,15 +107,14 @@ export default function LabelView() {
     setBusy(true); setError(null); setMessage(null)
     try {
       const entry = await saveDatasetEntry(imageBlob, boxes, split, imageName ?? undefined)
-      // Keep the image + boxes loaded so the user can keep adding to the
-      // same entry. We adopt the backend-assigned filename (matters for
-      // snapshots, which arrive without one) so the next save overwrites
-      // the same entry instead of creating a duplicate.
-      setImageName(entry.filename)
+      // Keep the canvas loaded so the user can keep refining and re-save.
+      // We deliberately do NOT adopt the backend-assigned filename: the
+      // backend auto-renames on collision (foo.png → foo - 1.png → …),
+      // so every Save click creates a new entry rather than overwriting.
       setMessage(
         `Saved ${entry.num_boxes} box${entry.num_boxes === 1 ? '' : 'es'} ` +
-        `→ ${entry.split}/${entry.filename}. Keep labelling, or click ` +
-        `"New image" to start fresh.`,
+        `→ ${entry.split}/${entry.filename}. Each Save creates a new ` +
+        `entry — click "New image" when you're done with this one.`,
       )
       refreshDataset()
     } catch (e) {
@@ -142,6 +128,7 @@ export default function LabelView() {
     if (imageUrl) URL.revokeObjectURL(imageUrl)
     setImageBlob(null); setImageUrl(null); setImageName(null); setBoxes([])
     setMessage(null); setError(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }, [imageUrl])
 
   const onDeleteEntry = useCallback(async (entry: DatasetEntry) => {
@@ -170,6 +157,7 @@ export default function LabelView() {
 
         {sourceMode === 'upload' ? (
           <input
+            ref={fileInputRef}
             type="file"
             accept="image/*"
             onChange={(e) => e.target.files?.[0] && onPickFile(e.target.files[0])}
@@ -279,7 +267,10 @@ export default function LabelView() {
               )}
             </>
           ) : (
-            <DatasetSummary stats={stats} entries={entries} onDelete={onDeleteEntry} />
+            <>
+              <DatasetSummary stats={stats} entries={entries} onDelete={onDeleteEntry} />
+              <TrainPanel />
+            </>
           )}
         </aside>
       </div>

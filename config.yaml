@@ -14,7 +14,10 @@ model:
   imgsz: 640
 
   # Filter detections below this confidence before drawing/returning.
-  conf_threshold: 0.25
+  # Set low (0.01) so the frontend slider can reveal even weak detections
+  # — useful while debugging a fresh fine-tune. Bump back up to ~0.25
+  # once the model is well-trained.
+  conf_threshold: 0.01
 
   # Non-max-suppression IoU threshold. Lower = stricter de-duplication.
   iou_threshold: 0.45

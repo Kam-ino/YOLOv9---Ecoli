@@ -1,5 +1,5 @@
 """Pydantic response models for /api/* endpoints."""
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -62,3 +62,27 @@ class DatasetEntryWithBoxes(BaseModel):
     """Returned by /api/dataset/find — entry metadata + the box list."""
     entry: DatasetEntry
     boxes: List[LabelBox]
+
+
+# ---------------------------------------------------------------------------
+# Training endpoints
+# ---------------------------------------------------------------------------
+
+class TrainStartRequest(BaseModel):
+    weights: str = "yolov9c.pt"
+    epochs: int = Field(100, ge=1, le=2000)
+    batch: int = Field(16, ge=1, le=256)
+    imgsz: int = Field(640, ge=64, le=2048)
+    device: str = "auto"          # "auto" | "cpu" | "0" | "0,1" | ...
+    name: Optional[str] = None
+
+
+class TrainingStatusResponse(BaseModel):
+    state: str                    # idle | running | completed | failed | killed
+    pid: Optional[int] = None
+    started_at: Optional[float] = None
+    finished_at: Optional[float] = None
+    return_code: Optional[int] = None
+    name: Optional[str] = None
+    command: Optional[List[str]] = None
+    log_lines: List[str]

@@ -166,3 +166,52 @@ export async function snapshotImage(source: string): Promise<Blob> {
   }
   return r.blob()
 }
+
+// ---- Training -------------------------------------------------------------
+
+export type TrainState = 'idle' | 'running' | 'completed' | 'failed' | 'killed'
+
+export type TrainingStatus = {
+  state: TrainState
+  pid: number | null
+  started_at: number | null
+  finished_at: number | null
+  return_code: number | null
+  name: string | null
+  command: string[] | null
+  log_lines: string[]
+}
+
+export type TrainStartRequest = {
+  weights?: string
+  epochs?: number
+  batch?: number
+  imgsz?: number
+  device?: string
+  name?: string
+}
+
+export async function fetchTrainingStatus(): Promise<TrainingStatus> {
+  const r = await fetch('/api/train/status')
+  if (!r.ok) throw new Error(`/api/train/status → ${r.status}`)
+  return r.json()
+}
+
+export async function startTraining(req: TrainStartRequest): Promise<TrainingStatus> {
+  const r = await fetch('/api/train', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new Error(`/api/train → ${r.status}: ${text || r.statusText}`)
+  }
+  return r.json()
+}
+
+export async function stopTraining(): Promise<TrainingStatus> {
+  const r = await fetch('/api/train/stop', { method: 'POST' })
+  if (!r.ok) throw new Error(`/api/train/stop → ${r.status}`)
+  return r.json()
+}
