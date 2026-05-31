@@ -43,10 +43,16 @@ export async function fetchHealth(): Promise<HealthInfo> {
   return r.json()
 }
 
-export async function predict(file: File): Promise<PredictResponse> {
+export async function predict(
+  file: File,
+  opts: { merge?: boolean } = {},
+): Promise<PredictResponse> {
   const fd = new FormData()
   fd.append('file', file)
-  const r = await fetch(api('/api/predict'), { method: 'POST', body: fd })
+  // merge=false → backend returns raw detections so client sliders can
+  // re-merge on the fly without re-running the model on each tick.
+  const merge = opts.merge ?? true
+  const r = await fetch(api(`/api/predict?merge=${merge}`), { method: 'POST', body: fd })
   if (!r.ok) {
     const text = await r.text().catch(() => '')
     throw new Error(`/api/predict → ${r.status}: ${text || r.statusText}`)

@@ -7,6 +7,7 @@ import {
   type LabelBox,
   type PredictResponse,
 } from './api'
+import { mergeClusters, type MergeParams } from './clusterMerge'
 import DetectionOverlay from './DetectionOverlay'
 
 
@@ -56,6 +57,13 @@ export default function UploadView() {
   const [error, setError] = useState<string | null>(null)
   const [confFilter, setConfFilter] = useState(0.0)
 
+  // Cluster-merge controls — applied client-side over the raw detections
+  // returned by the backend so the sliders give instant feedback without
+  // re-running the model. Defaults mirror the backend config defaults.
+  const [mergeEnabled, setMergeEnabled] = useState(true)
+  const [mergeMargin, setMergeMargin] = useState(0.01)
+  const [mergeMinSize, setMergeMinSize] = useState(3)
+
   const onPick = useCallback((f: File) => {
     setFile(f)
     setImageUrl((prev) => {
@@ -72,7 +80,9 @@ export default function UploadView() {
     setLoading(true)
     setError(null)
     try {
-      setResult(await predict(file))
+      // merge=false → backend returns raw boxes. We re-merge client-side
+      // so the sliders below are instant.
+      setResult(await predict(file, { merge: false }))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -80,9 +90,29 @@ export default function UploadView() {
     }
   }, [file])
 
+  // Pipeline: raw detections → cluster-merge → confidence filter.
+  // (Merging first so a cluster's mean-confidence can pass the filter
+  // even when individual members were below it.)
+  const merged = useMemo(() => {
+    if (!result) return [] as Detection[]
+    const params: MergeParams = {
+      enabled: mergeEnabled,
+      marginFrac: mergeMargin,
+      minSize: mergeMinSize,
+      sourceClassName: 'ecoli',
+      targetClassName: 'ecoli_cluster',
+    }
+    return mergeClusters(result.detections, result.image_size, params)
+  }, [result, mergeEnabled, mergeMargin, mergeMinSize])
+
   const filtered = useMemo(
-    () => (result ? result.detections.filter((d) => d.confidence >= confFilter) : []),
-    [result, confFilter],
+    () => merged.filter((d) => d.confidence >= confFilter),
+    [merged, confFilter],
+  )
+
+  const clusterCount = useMemo(
+    () => filtered.filter((d) => d.class_name === 'ecoli_cluster').length,
+    [filtered],
   )
 
   // Hand the current image + (filtered) predictions off to the Label
@@ -117,6 +147,42 @@ export default function UploadView() {
         <button onClick={onSubmit} disabled={!file || loading}>
           {loading ? 'Running…' : 'Detect'}
         </button>
+
+        {/* Merge settings are persistent — adjustable before Detect,
+            then continue to live-tune the result after Detect. */}
+        <label className="conf-filter">
+          <input
+            type="checkbox"
+            checked={mergeEnabled}
+            onChange={(e) => setMergeEnabled(e.target.checked)}
+            style={{ marginRight: 6 }}
+          />
+          <span>Cluster merging</span>
+        </label>
+        <label className="conf-filter" title="How close two boxes have to be to count as neighbours. Fraction of the longer image edge.">
+          <span>Closeness: <strong>{(mergeMargin * 100).toFixed(1)}%</strong></span>
+          <input
+            type="range" min={0} max={0.05} step={0.001}
+            value={mergeMargin}
+            onChange={(e) => setMergeMargin(parseFloat(e.target.value))}
+            disabled={!mergeEnabled}
+          />
+        </label>
+        <label className="conf-filter" title="Smallest neighbour group that becomes a cluster. Higher = only large clumps merge; loose pairs stay individual.">
+          <span>Min cluster size: <strong>{mergeMinSize}</strong></span>
+          <input
+            type="range" min={10} max={100} step={1}
+            value={mergeMinSize}
+            onChange={(e) => setMergeMinSize(parseInt(e.target.value, 10))}
+            disabled={!mergeEnabled}
+          />
+        </label>
+        {result && mergeEnabled && clusterCount > 0 && (
+          <span className="muted small">
+            → {clusterCount} cluster{clusterCount === 1 ? '' : 's'}
+          </span>
+        )}
+
         {result && (
           <label className="conf-filter">
             <span>Min confidence: <strong>{confFilter.toFixed(2)}</strong></span>

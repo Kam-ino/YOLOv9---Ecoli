@@ -288,7 +288,17 @@ def create_app() -> FastAPI:
     # -- /api/predict --------------------------------------------------------
 
     @app.post("/api/predict", response_model=PredictResponse)
-    async def predict(file: UploadFile = File(...)) -> PredictResponse:
+    async def predict(
+        file: UploadFile = File(...),
+        merge: bool = Query(
+            True,
+            description=(
+                "Apply the server-side cluster-merge pass. Set false when "
+                "the client wants raw detections to drive its own merge "
+                "(e.g. the Upload tab's live sliders)."
+            ),
+        ),
+    ) -> PredictResponse:
         if not service.is_ready:
             raise HTTPException(status_code=503, detail="Detector not initialised.")
 
@@ -317,8 +327,10 @@ def create_app() -> FastAPI:
             dets = service.detector.predict(frame)
             inference_ms = (time.perf_counter() - t0) * 1000.0
 
-        # Post-processing pass: collapse dense ecoli clusters if enabled.
-        dets = _apply_cluster_merge(dets, image_size=(w, h), cfg=cfg)
+        # Post-processing pass: collapse dense ecoli clusters if enabled
+        # (and unless the caller has opted out to do it themselves).
+        if merge:
+            dets = _apply_cluster_merge(dets, image_size=(w, h), cfg=cfg)
 
         return PredictResponse(
             detections=[

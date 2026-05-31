@@ -162,6 +162,12 @@ code {
 .conf-filter strong { color: var(--fg); }
 .conf-filter input[type="range"] { width: 140px; }
 
+/* Merge sliders live in the same row as Detect — disable styling
+   applied so they visibly grey when the checkbox is off. */
+.upload-controls input[type="range"]:disabled,
+.upload-controls input[type="checkbox"]:disabled { opacity: 0.4; cursor: not-allowed; }
+.upload-controls label.conf-filter:has(input:disabled) { opacity: 0.55; }
+
 .live-controls label {
   display: flex;
   gap: 8px;
