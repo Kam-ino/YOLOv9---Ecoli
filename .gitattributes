@@ -1,2 +1,21 @@
-# Auto detect text files and perform LF normalization
+# Default: let git handle text vs binary detection.
 * text=auto
+
+# Shell scripts and other files that get *executed* on Linux/macOS MUST
+# have LF endings — a CRLF shebang line breaks them with the cryptic
+#   /usr/bin/env: 'bash\r': No such file or directory
+# regardless of the host the repo was cloned on.
+*.sh         text eol=lf
+*.bash       text eol=lf
+Dockerfile   text eol=lf
+Makefile     text eol=lf
+
+# systemd unit files / yaml / config also expect LF.
+*.service    text eol=lf
+*.yaml       text eol=lf
+*.yml        text eol=lf
+
+# Windows-only — keep CRLF so cmd.exe handles them correctly.
+*.bat        text eol=crlf
+*.cmd        text eol=crlf
+*.ps1        text eol=crlf
