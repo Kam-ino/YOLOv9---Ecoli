@@ -112,3 +112,11 @@ logging:
 output:
   save_video: false
   output_dir: outputs
+
+# Cluster-merge is a no-op for the smoke config — COCO yolov9c.pt never
+# emits `ecoli` boxes, so there's nothing to merge. Disabled explicitly
+# to keep startup logs quiet.
+cluster_merge:
+  enabled: false
+  source_class_name: ecoli
+  target_class_name: ecoli_cluster

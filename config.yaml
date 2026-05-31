@@ -47,3 +47,22 @@ logging:
 output:
   save_video: false         # CLI --save also enables per-run recording.
   output_dir: outputs
+
+cluster_merge:
+  # Post-processing pass that groups dense `source_class_name` boxes into
+  # one `target_class_name` box (useful when a clump of bacteria reads
+  # as 30 overlapping `ecoli` detections you'd rather see as one
+  # `ecoli_cluster`). Runs after NMS, before the boxes leave the API.
+  enabled: true
+
+  # Neighbour radius: two boxes are connected if their bounding boxes
+  # overlap *after each is expanded by margin × max(image_w, image_h)*.
+  # 0.01 = 1% of the longer image edge (~13 px on 1280×720; scale-aware).
+  margin: 0.01
+
+  # Smallest component that becomes a cluster. Below this, members stay
+  # as individual source-class boxes.
+  min_size: 3
+
+  source_class_name: ecoli
+  target_class_name: ecoli_cluster

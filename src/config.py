@@ -8,7 +8,7 @@ will eventually wrap this code can pull these objects in without
 pulling pydantic v1 / v2 compatibility into the picture.
 """
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Union
 
@@ -55,6 +55,19 @@ class OutputConfig:
 
 
 @dataclass
+class ClusterMergeConfig:
+    """Post-processing pass that groups dense source-class detections
+    into single target-class boxes (e.g. many ``ecoli`` boxes → one
+    ``ecoli_cluster`` box). All fields optional with sensible defaults
+    so old configs continue to load."""
+    enabled: bool = False
+    margin: float = 0.01            # fraction of max(image_w, image_h)
+    min_size: int = 3               # minimum boxes per cluster
+    source_class_name: str = "ecoli"
+    target_class_name: str = "ecoli_cluster"
+
+
+@dataclass
 class AppConfig:
     model: ModelConfig
     capture: CaptureConfig
@@ -62,6 +75,7 @@ class AppConfig:
     classes: List[str]
     logging: LoggingConfig
     output: OutputConfig
+    cluster_merge: ClusterMergeConfig = field(default_factory=ClusterMergeConfig)
 
 
 def load_config(path: str) -> AppConfig:
@@ -92,6 +106,9 @@ def load_config(path: str) -> AppConfig:
         logging_c = LoggingConfig(**raw["logging"])
         output = OutputConfig(**raw["output"])
         classes = list(raw.get("classes", []))
+        # cluster_merge is optional — old configs without the section
+        # get the dataclass defaults (enabled=False, no behaviour change).
+        cluster_merge = ClusterMergeConfig(**(raw.get("cluster_merge") or {}))
     except (KeyError, TypeError) as exc:
         raise ValueError(
             f"Invalid config structure in {cfg_path}: {exc}. "
@@ -108,6 +125,7 @@ def load_config(path: str) -> AppConfig:
         classes=classes,
         logging=logging_c,
         output=output,
+        cluster_merge=cluster_merge,
     )
 
 

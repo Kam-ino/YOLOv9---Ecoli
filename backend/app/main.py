@@ -37,10 +37,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from src.capture import CaptureError, VideoSource
+from src.config import AppConfig
+from src.inference import Detection
 from src.logging_setup import setup_logging
 from src.preprocessing import apply_clahe
 from src.visualization import draw_detections, draw_hud
 
+from .cluster_merge import merge_clusters
 from .dataset import (
     VALID_SPLITS, add_label_class, get_store, init_store, load_label_classes,
 )
@@ -73,6 +76,53 @@ async def lifespan(_app: FastAPI):
     init_store(dataset_root)
     yield
     log.info("Lifespan shutdown.")
+
+
+# ---------------------------------------------------------------------------
+# Cluster-merge post-processing
+# ---------------------------------------------------------------------------
+
+def _apply_cluster_merge(
+    detections: List[Detection],
+    image_size: tuple,
+    cfg: AppConfig,
+) -> List[Detection]:
+    """Apply the configured cluster-merge pass, or pass detections through.
+
+    Resolves source/target class names → ids against ``cfg.classes``.
+    If the source class isn't in the vocabulary, the merge is a no-op
+    (we don't want to fail open when the user hasn't configured it).
+    If the target class isn't in the vocabulary, we synthesize an id
+    one past the end so the frontend palette picks a distinct colour.
+    """
+    cm = cfg.cluster_merge
+    if not cm.enabled:
+        return detections
+
+    if cm.source_class_name not in cfg.classes:
+        log.warning(
+            "cluster_merge: source class %r not in config.classes %s — skipping.",
+            cm.source_class_name, cfg.classes,
+        )
+        return detections
+    source_id = cfg.classes.index(cm.source_class_name)
+
+    if cm.target_class_name in cfg.classes:
+        target_id = cfg.classes.index(cm.target_class_name)
+    else:
+        # One past the end — colour palette wraps so this still gets a
+        # consistent (different) hue per render.
+        target_id = len(cfg.classes)
+
+    return merge_clusters(
+        detections,
+        image_size=image_size,
+        source_class_id=source_id,
+        target_class_id=target_id,
+        target_class_name=cm.target_class_name,
+        margin_frac=cm.margin,
+        min_size=cm.min_size,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +316,9 @@ def create_app() -> FastAPI:
             t0 = time.perf_counter()
             dets = service.detector.predict(frame)
             inference_ms = (time.perf_counter() - t0) * 1000.0
+
+        # Post-processing pass: collapse dense ecoli clusters if enabled.
+        dets = _apply_cluster_merge(dets, image_size=(w, h), cfg=cfg)
 
         return PredictResponse(
             detections=[
@@ -645,7 +698,14 @@ def _mjpeg_generator(
                     # actually call the model.
                     if (frame_idx - 1) % infer_every == 0:
                         with service.lock:
-                            last_dets = service.detector.predict(frame)
+                            raw = service.detector.predict(frame)
+                        # Cluster-merge so the live stream behaves the
+                        # same as the upload tab. Applied per inference,
+                        # not per displayed frame.
+                        fh, fw = frame.shape[:2]
+                        last_dets = _apply_cluster_merge(
+                            raw, image_size=(fw, fh), cfg=cfg,
+                        )
                     draw_detections(frame, last_dets)
                     dt = time.perf_counter() - t0
                     if dt > 0:
