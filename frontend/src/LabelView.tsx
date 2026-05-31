@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   SPLITS,
   addLabelClass,
@@ -14,6 +15,7 @@ import {
   type LabelBox,
   type Split,
 } from './api'
+import type { SeedFromPredictionState } from './UploadView'
 import LabelCanvas from './LabelCanvas'
 import TrainPanel from './TrainPanel'
 
@@ -61,6 +63,35 @@ export default function LabelView() {
       if (imageUrl) URL.revokeObjectURL(imageUrl)
     }
   }, [imageUrl])
+
+  // If the user clicked "Edit & save as training data" on the Upload
+  // tab, navigate state arrives carrying the original blob + the
+  // detection boxes already converted to YOLO format. Seed the canvas
+  // with that, then clear the history state so a refresh of /train
+  // doesn't re-seed surprise the user.
+  const location = useLocation()
+  const navigate = useNavigate()
+  useEffect(() => {
+    const seed = location.state as SeedFromPredictionState | null | undefined
+    if (!seed || !seed.fromPrediction || !seed.imageBlob) return
+
+    if (imageUrl) URL.revokeObjectURL(imageUrl)
+    setImageBlob(seed.imageBlob)
+    setImageUrl(URL.createObjectURL(seed.imageBlob))
+    setImageName(seed.imageName)
+    setBoxes(seed.boxes)
+    setError(null)
+    setMessage(
+      `Loaded ${seed.boxes.length} box${seed.boxes.length === 1 ? '' : 'es'} ` +
+      `from your last prediction (of ${seed.sourceCount} total). ` +
+      `Add boxes the model missed, delete wrong ones, then Save.`,
+    )
+    // Clear the navigate state so re-renders / refreshes don't reload.
+    navigate(location.pathname, { replace: true, state: null })
+    // We deliberately depend on location.key — only run when the user
+    // arrives via a fresh navigate, not on every imageUrl change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key])
 
   const refreshDataset = useCallback(() => {
     fetchDatasetStats().then(setStats).catch(() => setStats(null))
