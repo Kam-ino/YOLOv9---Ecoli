@@ -74,6 +74,29 @@ async def lifespan(_app: FastAPI):
 
 
 # ---------------------------------------------------------------------------
+# CORS origin allowlist
+# ---------------------------------------------------------------------------
+
+_DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173", "http://127.0.0.1:5173",   # Vite default
+    "http://localhost:3003", "http://127.0.0.1:3003",   # our dev override
+]
+
+
+def _parse_cors_origins() -> List[str]:
+    """Return CORS allowlist: env var if set, otherwise local-dev defaults.
+
+    CORS_ORIGINS is a comma-separated list — set it on whatever host runs
+    uvicorn when the UI lives on a different origin (Vercel, a tunnel, etc.):
+
+        CORS_ORIGINS=https://my-app.vercel.app,https://abc.trycloudflare.com
+    """
+    raw = os.environ.get("CORS_ORIGINS", "")
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    return origins or list(_DEFAULT_CORS_ORIGINS)
+
+
+# ---------------------------------------------------------------------------
 # training/dataset.yaml bootstrap
 # ---------------------------------------------------------------------------
 
@@ -167,17 +190,17 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # During `vite dev`, the frontend is served from localhost:5173 and needs
-    # cross-origin access. In production it's served from the same FastAPI
-    # process via StaticFiles, so CORS is a no-op there.
+    # CORS — three scenarios:
+    #   1. Single-process serve (uvicorn serves UI and API): same origin,
+    #      CORS is a no-op.
+    #   2. Local dev (Vite on :3003 / :5173, backend on :8003): the
+    #      defaults below cover the standard dev ports.
+    #   3. UI hosted elsewhere (e.g. on Vercel) talking to this backend
+    #      through a tunnel: set CORS_ORIGINS env var to a comma-separated
+    #      allowlist that includes your deployed UI's origin.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "http://localhost:3003",
-            "http://127.0.0.1:3003",
-        ],
+        allow_origins=_parse_cors_origins(),
         allow_methods=["*"],
         allow_headers=["*"],
     )

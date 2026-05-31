@@ -1,13 +1,22 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// During development, Vite proxies `/api/*` to the FastAPI backend on :8000
-// so the React app talks to its API without CORS. The MJPEG stream goes
-// through the same proxy.
+// Build output dir depends on context:
+//   - On Vercel (process.env.VERCEL === '1' at build time):
+//     write to `dist/` so Vercel's static deploy picks it up.
+//   - Locally (single-process serve via uvicorn):
+//     write into the FastAPI app's static directory so one uvicorn
+//     process serves both the UI and /api/* on the same port.
 //
-// `build.outDir` writes the production bundle directly into the FastAPI
-// app's static directory so a single `uvicorn` process can serve both
-// the UI and the API in production.
+// The dev server proxy still forwards /api/* to localhost:8003 so the
+// same React code works without thinking about the backend URL during
+// local development.
+//
+// `process` is available at build time (vite.config.ts runs in Node)
+// but we don't pull in @types/node — declare what we use locally.
+declare const process: { env: Record<string, string | undefined> }
+const isVercelBuild = process.env.VERCEL === '1'
+
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -24,7 +33,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../backend/app/static',
+    outDir: isVercelBuild ? 'dist' : '../backend/app/static',
     emptyOutDir: true,
   },
 })

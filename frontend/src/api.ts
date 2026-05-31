@@ -1,7 +1,21 @@
 // Typed thin wrappers around the FastAPI backend on /api/*.
-// The Vite dev server proxies /api → http://localhost:8000 (see vite.config.ts);
-// in production the same FastAPI process serves the built bundle alongside the
-// API, so the URLs are identical in both modes.
+//
+// API_BASE resolves the API URL:
+//   - empty (default): use relative `/api/*` — works for local dev (Vite
+//     proxies to localhost:8003) and for local single-process serve
+//     (uvicorn serves both UI and API on the same port).
+//   - set via `VITE_API_BASE_URL` at build time: prepended to every
+//     fetch. Required when the UI is hosted somewhere other than the
+//     backend (e.g. UI on Vercel, backend reached through a Cloudflare
+//     or ngrok tunnel).
+//
+// IMPORTANT: when the UI is HTTPS (Vercel) the API base MUST also be
+// HTTPS, otherwise the browser blocks the request as mixed content.
+const API_BASE: string = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')
+
+function api(path: string): string {
+  return `${API_BASE}${path}`
+}
 
 export type Detection = {
   bbox: [number, number, number, number]
@@ -24,7 +38,7 @@ export type HealthInfo = {
 }
 
 export async function fetchHealth(): Promise<HealthInfo> {
-  const r = await fetch('/api/health')
+  const r = await fetch(api('/api/health'))
   if (!r.ok) throw new Error(`/api/health → ${r.status}`)
   return r.json()
 }
@@ -32,7 +46,7 @@ export async function fetchHealth(): Promise<HealthInfo> {
 export async function predict(file: File): Promise<PredictResponse> {
   const fd = new FormData()
   fd.append('file', file)
-  const r = await fetch('/api/predict', { method: 'POST', body: fd })
+  const r = await fetch(api('/api/predict'), { method: 'POST', body: fd })
   if (!r.ok) {
     const text = await r.text().catch(() => '')
     throw new Error(`/api/predict → ${r.status}: ${text || r.statusText}`)
@@ -50,7 +64,7 @@ export function streamUrl(
     infer_every: String(inferEvery),
     _t: String(cacheBust),
   })
-  return `/api/stream?${params.toString()}`
+  return api(`/api/stream?${params.toString()}`)
 }
 
 // BGR palette from the backend visualization, mirrored as web hex.
@@ -92,21 +106,21 @@ export type Split = 'train' | 'val' | 'test'
 export const SPLITS: Split[] = ['train', 'val', 'test']
 
 export async function fetchLabelClasses(): Promise<string[]> {
-  const r = await fetch('/api/label-classes')
+  const r = await fetch(api('/api/label-classes'))
   if (!r.ok) throw new Error(`/api/label-classes → ${r.status}`)
   const data = (await r.json()) as { classes: string[] }
   return data.classes
 }
 
 export async function fetchDatasetStats(): Promise<DatasetStats> {
-  const r = await fetch('/api/dataset/stats')
+  const r = await fetch(api('/api/dataset/stats'))
   if (!r.ok) throw new Error(`/api/dataset/stats → ${r.status}`)
   return r.json()
 }
 
 export async function fetchDatasetList(split?: Split): Promise<DatasetEntry[]> {
   const params = split ? `?split=${split}` : ''
-  const r = await fetch(`/api/dataset/list${params}`)
+  const r = await fetch(api(`/api/dataset/list${params}`))
   if (!r.ok) throw new Error(`/api/dataset/list → ${r.status}`)
   return r.json()
 }
@@ -123,7 +137,7 @@ export async function saveDatasetEntry(
   fd.append('boxes', JSON.stringify(boxes))
   fd.append('split', split)
   if (filename) fd.append('filename', filename)
-  const r = await fetch('/api/dataset/save', { method: 'POST', body: fd })
+  const r = await fetch(api('/api/dataset/save'), { method: 'POST', body: fd })
   if (!r.ok) {
     const text = await r.text().catch(() => '')
     throw new Error(`/api/dataset/save → ${r.status}: ${text || r.statusText}`)
@@ -140,7 +154,7 @@ export async function findDatasetEntry(
   filename: string,
 ): Promise<DatasetEntryWithBoxes | null> {
   const r = await fetch(
-    `/api/dataset/find?filename=${encodeURIComponent(filename)}`,
+    api(`/api/dataset/find?filename=${encodeURIComponent(filename)}`),
   )
   if (r.status === 404) return null
   if (!r.ok) throw new Error(`/api/dataset/find → ${r.status}`)
@@ -149,7 +163,7 @@ export async function findDatasetEntry(
 
 export async function deleteDatasetEntry(split: Split, filename: string): Promise<void> {
   const r = await fetch(
-    `/api/dataset/${split}/${encodeURIComponent(filename)}`,
+    api(`/api/dataset/${split}/${encodeURIComponent(filename)}`),
     { method: 'DELETE' },
   )
   if (!r.ok) throw new Error(`delete → ${r.status}`)
@@ -157,7 +171,7 @@ export async function deleteDatasetEntry(split: Split, filename: string): Promis
 
 export async function snapshotImage(source: string): Promise<Blob> {
   const r = await fetch(
-    `/api/snapshot?source=${encodeURIComponent(source)}`,
+    api(`/api/snapshot?source=${encodeURIComponent(source)}`),
     { method: 'POST' },
   )
   if (!r.ok) {
@@ -192,13 +206,13 @@ export type TrainStartRequest = {
 }
 
 export async function fetchTrainingStatus(): Promise<TrainingStatus> {
-  const r = await fetch('/api/train/status')
+  const r = await fetch(api('/api/train/status'))
   if (!r.ok) throw new Error(`/api/train/status → ${r.status}`)
   return r.json()
 }
 
 export async function startTraining(req: TrainStartRequest): Promise<TrainingStatus> {
-  const r = await fetch('/api/train', {
+  const r = await fetch(api('/api/train'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
@@ -211,7 +225,7 @@ export async function startTraining(req: TrainStartRequest): Promise<TrainingSta
 }
 
 export async function stopTraining(): Promise<TrainingStatus> {
-  const r = await fetch('/api/train/stop', { method: 'POST' })
+  const r = await fetch(api('/api/train/stop'), { method: 'POST' })
   if (!r.ok) throw new Error(`/api/train/stop → ${r.status}`)
   return r.json()
 }

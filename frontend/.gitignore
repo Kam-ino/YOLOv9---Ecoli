@@ -4,3 +4,6 @@ dist/
 *.local
 .env
 .env.local
+
+# Allow the .env.example template through.
+!.env.example
