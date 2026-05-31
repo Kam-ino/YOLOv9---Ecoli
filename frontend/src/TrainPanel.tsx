@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   fetchTrainingStatus,
+  resetModel,
   startTraining,
   stopTraining,
   type TrainingStatus,
 } from './api'
+import TrainingConsole from './TrainingConsole'
 
-// Polls /api/train/status. The polling interval adapts: fast while a
-// run is active, slow otherwise — keeps idle CPU/network noise down
-// without sacrificing log latency when something is actually running.
+// Polls /api/train/status. Adapts the interval: fast while a run is
+// active, slow otherwise — keeps idle CPU/network noise down without
+// sacrificing log latency when something is actually running.
 const POLL_RUNNING_MS = 2000
 const POLL_IDLE_MS = 10_000
 
@@ -21,8 +23,16 @@ export default function TrainPanel() {
   const [imgsz, setImgsz] = useState(640)
   const [device, setDevice] = useState('auto')
   const [error, setError] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const logRef = useRef<HTMLDivElement>(null)
+  const [resetting, setResetting] = useState(false)
+  const [consoleOpen, setConsoleOpen] = useState(false)
+
+  // Track the last seen state so we can auto-open the modal on the
+  // transition into 'running' (covers both "user clicks Start here" and
+  // "user refreshes while a run is in flight").
+  const prevStateRef = useRef<TrainingStatus['state'] | null>(null)
+  const userClosedRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -47,17 +57,32 @@ export default function TrainPanel() {
     }
   }, [])
 
-  // Auto-scroll the log view to the bottom as new lines arrive — but
-  // only while the run is active. After it finishes, leave the user
-  // free to scroll up and read.
+  // Auto-open the modal the first time we observe a 'running' state
+  // during this component's life, *unless* the user has explicitly
+  // dismissed it. That way the modal pops as soon as Start is clicked,
+  // or on a fresh page load if training is already in flight — but
+  // closing it sticks until the next manual reopen.
   useEffect(() => {
-    if (logRef.current && status?.state === 'running') {
-      logRef.current.scrollTop = logRef.current.scrollHeight
+    if (!status) return
+    if (
+      status.state === 'running' &&
+      prevStateRef.current !== 'running' &&
+      !userClosedRef.current
+    ) {
+      setConsoleOpen(true)
     }
+    if (status.state !== 'running') {
+      // Reset the "user closed" guard so the next run can auto-open again.
+      userClosedRef.current = false
+    }
+    prevStateRef.current = status.state
   }, [status])
 
   const onStart = useCallback(async () => {
-    setBusy(true); setError(null)
+    setBusy(true)
+    setError(null)
+    userClosedRef.current = false
+    setConsoleOpen(true)
     try {
       setStatus(await startTraining({ weights, epochs, batch, imgsz, device }))
     } catch (e) {
@@ -78,10 +103,45 @@ export default function TrainPanel() {
     }
   }, [])
 
+  const onCloseConsole = useCallback(() => {
+    setConsoleOpen(false)
+    userClosedRef.current = true
+  }, [])
+
+  // These derived values are referenced by callbacks below — declare
+  // them before any useCallback that lists them in its dependency array
+  // to avoid a temporal-dead-zone error at render time.
   const running = status?.state === 'running'
   const elapsed = status?.started_at
     ? Math.max(0, Math.floor(Date.now() / 1000 - status.started_at))
     : 0
+  const hasLogs = !!status && status.log_lines.length > 0
+
+  const onReset = useCallback(async () => {
+    // Belt and braces: the backend rejects reset during a run, but
+    // catch it here too so the user doesn't even get a chance.
+    if (running) {
+      setError("Stop the training run before resetting the model.")
+      return
+    }
+    const ok = window.confirm(
+      "Reset the model to the pretrained base?\n\n" +
+      "• Your current trained weights will be moved to models/ecoli_yolov9c.bak-<timestamp>.pt (recoverable).\n" +
+      "• The detector reloads from the COCO base — the badge will flip back to 80 classes.\n" +
+      "• Your labels and dataset are NOT touched. Re-run training to fine-tune from scratch.",
+    )
+    if (!ok) return
+    setResetting(true); setError(null); setInfo(null)
+    try {
+      const result = await resetModel()
+      const backed = result.backup ? ` (backup: ${result.backup})` : ''
+      setInfo(`Model reset — detector is now serving the base ${result.active_weights}${backed}.`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setResetting(false)
+    }
+  }, [running])
 
   return (
     <div className="train-panel">
@@ -144,18 +204,23 @@ export default function TrainPanel() {
             returnCode={status.return_code}
           />
         )}
+      </div>
+
+      <div className="train-actions">
+        {hasLogs && (
+          <button
+            onClick={() => setConsoleOpen(true)}
+            style={{ background: 'var(--bg-elev-2)', color: 'var(--fg)' }}
+            title="Open the training console"
+          >
+            {running ? 'View live console' : 'View last console'}
+          </button>
+        )}
         {status?.name && <span className="muted small">run: {status.name}</span>}
       </div>
 
       {error && <div className="error" style={{ marginTop: 8 }}>{error}</div>}
-
-      {status && status.log_lines.length > 0 && (
-        <div ref={logRef} className="train-log">
-          {status.log_lines.map((line, i) => (
-            <div key={i}>{line}</div>
-          ))}
-        </div>
-      )}
+      {info && <div className="muted small" style={{ marginTop: 8 }}>{info}</div>}
 
       {status?.state === 'completed' && status.name && (
         <p className="muted small" style={{ marginTop: 8 }}>
@@ -164,6 +229,30 @@ export default function TrainPanel() {
           . Copy it to <code>models/ecoli_yolov9c.pt</code> and switch the
           backend to <code>config.yaml</code> to deploy.
         </p>
+      )}
+
+      <div className="train-danger">
+        <h4>Danger zone</h4>
+        <button
+          onClick={onReset}
+          disabled={resetting || running}
+          className="danger-button"
+          title={
+            running
+              ? "Stop training first"
+              : "Move trained weights to a .bak file and reload from pretrained base"
+          }
+        >
+          {resetting ? 'Resetting…' : 'Reset model to pretrained base'}
+        </button>
+      </div>
+
+      {consoleOpen && (
+        <TrainingConsole
+          status={status}
+          onClose={onCloseConsole}
+          onStopped={(s) => setStatus(s)}
+        />
       )}
     </div>
   )

@@ -41,12 +41,14 @@ from src.logging_setup import setup_logging
 from src.preprocessing import apply_clahe
 from src.visualization import draw_detections, draw_hud
 
-from .dataset import VALID_SPLITS, get_store, init_store, load_label_classes
+from .dataset import (
+    VALID_SPLITS, add_label_class, get_store, init_store, load_label_classes,
+)
 from .detector import service
 from .schemas import (
-    DatasetEntry, DatasetEntryWithBoxes, DatasetStats, DetectionDTO,
-    HealthResponse, LabelBox, PredictResponse, TrainStartRequest,
-    TrainingStatusResponse,
+    AddClassRequest, DatasetEntry, DatasetEntryWithBoxes, DatasetStats,
+    DetectionDTO, HealthResponse, LabelBox, PredictResponse,
+    TrainStartRequest, TrainingStatusResponse,
 )
 from .training import training_service
 
@@ -358,6 +360,19 @@ def create_app() -> FastAPI:
     def label_classes() -> dict:
         return {"classes": load_label_classes()}
 
+    @app.post("/api/label-classes")
+    def label_classes_add(req: AddClassRequest) -> dict:
+        """Append a new label class to the vocabulary.
+
+        Persists to ``training/dataset.yaml`` so subsequent training runs
+        and saves see the new class. Returns the updated full list.
+        """
+        try:
+            classes = add_label_class(req.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"classes": classes}
+
     # -- /api/dataset/* ------------------------------------------------------
 
     @app.post("/api/dataset/save", response_model=DatasetEntry)
@@ -524,6 +539,36 @@ def create_app() -> FastAPI:
     @app.get("/api/train/status", response_model=TrainingStatusResponse)
     def train_status() -> TrainingStatusResponse:
         return TrainingStatusResponse(**training_service.status())
+
+    # -- /api/model/reset ----------------------------------------------------
+
+    @app.post("/api/model/reset")
+    def model_reset() -> dict:
+        """Reset the active model back to the pretrained base.
+
+        Renames the current fine-tuned weights to ``<name>.bak-<ts>.<ext>``
+        next to the original (so the user can restore by hand), then
+        hot-reloads the detector against ``models/yolov9c.pt``.
+
+        Rejects while a training run is in flight — swapping the detector
+        out from under the trainer is fine technically (separate
+        processes) but the resulting ``best.pt`` won't match what the
+        user can deploy, which is confusing.
+        """
+        if not service.is_ready:
+            raise HTTPException(status_code=503, detail="Detector not initialised.")
+        if training_service.is_running:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Can't reset while training is running. Stop the run "
+                    "first, then reset."
+                ),
+            )
+        try:
+            return service.reset()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     # -- Built React app (production) ---------------------------------------
     # Mount LAST so /api/* takes precedence over the catch-all.

@@ -112,6 +112,20 @@ export async function fetchLabelClasses(): Promise<string[]> {
   return data.classes
 }
 
+export async function addLabelClass(name: string): Promise<string[]> {
+  const r = await fetch(api('/api/label-classes'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new Error(`/api/label-classes → ${r.status}: ${text || r.statusText}`)
+  }
+  const data = (await r.json()) as { classes: string[] }
+  return data.classes
+}
+
 export async function fetchDatasetStats(): Promise<DatasetStats> {
   const r = await fetch(api('/api/dataset/stats'))
   if (!r.ok) throw new Error(`/api/dataset/stats → ${r.status}`)
@@ -227,5 +241,23 @@ export async function startTraining(req: TrainStartRequest): Promise<TrainingSta
 export async function stopTraining(): Promise<TrainingStatus> {
   const r = await fetch(api('/api/train/stop'), { method: 'POST' })
   if (!r.ok) throw new Error(`/api/train/stop → ${r.status}`)
+  return r.json()
+}
+
+// ---- Model reset ----------------------------------------------------------
+
+export type ResetResult = {
+  backup: string | null
+  active_weights: string
+  classes: string[]
+  device: string
+}
+
+export async function resetModel(): Promise<ResetResult> {
+  const r = await fetch(api('/api/model/reset'), { method: 'POST' })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new Error(`/api/model/reset → ${r.status}: ${text || r.statusText}`)
+  }
   return r.json()
 }

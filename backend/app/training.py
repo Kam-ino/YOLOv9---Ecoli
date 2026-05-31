@@ -32,6 +32,29 @@ from typing import Deque, List, Optional
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
+def _resolve_train_device(spec: str) -> Optional[str]:
+    """Translate the form's device value into a concrete --device argument.
+
+    - "auto" / "" → "0" if a CUDA GPU is visible, else None (Ultralytics
+      will fall back to CPU). This is what makes "auto" actually use the
+      NVIDIA GPU by default; without it we depended on Ultralytics' own
+      detection, which has historically been unreliable.
+    - any explicit value ("0", "cpu", "0,1", "cuda:0", ...) passes
+      through unchanged.
+
+    Returning None means "don't pass --device at all".
+    """
+    if spec and spec.strip().lower() not in ("", "auto"):
+        return spec.strip()
+    try:
+        import torch  # already loaded by the backend; cheap import
+        if torch.cuda.is_available():
+            return "0"
+    except ImportError:
+        pass
+    return None
+
+
 log = logging.getLogger(__name__)
 
 
@@ -90,9 +113,12 @@ class TrainingService:
                 "--imgsz", str(imgsz),
                 "--name", name,
             ]
-            # device="auto" → let training/train.py / Ultralytics pick.
-            if device and device.lower() != "auto":
-                cmd += ["--device", device]
+            resolved_device = _resolve_train_device(device)
+            if resolved_device is not None:
+                cmd += ["--device", resolved_device]
+                log.info("Training will use --device=%s", resolved_device)
+            else:
+                log.info("No CUDA detected — training on CPU.")
 
             log.info("Spawning training subprocess: %s (cwd=%s)",
                      " ".join(cmd), _REPO_ROOT)

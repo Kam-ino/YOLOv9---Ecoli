@@ -99,6 +99,9 @@ code {
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev);
 }
+/* React Router renders NavLink as <a> — selector targets both buttons
+   and the .tab class so the chrome looks identical. */
+.tabs .tab,
 .tabs button {
   background: none;
   color: var(--fg-muted);
@@ -106,12 +109,32 @@ code {
   padding: 6px 14px;
   border-radius: var(--radius);
   font-weight: 500;
+  font-size: 0.9rem;
+  text-decoration: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
 }
+.tabs .tab:hover,
 .tabs button:hover { color: var(--fg); filter: none; }
+.tabs .tab.active,
 .tabs button.active {
   background: var(--bg-elev-2);
   color: var(--fg);
   border-color: var(--border);
+}
+
+/* The brand link in the top bar — strip default <a> styling. */
+.brand {
+  color: inherit;
+  text-decoration: none;
+}
+.brand h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .content {
@@ -378,21 +401,130 @@ code {
   margin-bottom: 8px;
 }
 
-.train-log {
-  margin-top: 12px;
-  background: #0a0f14;
+/* ---- Modal training console ---- */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+  animation: modal-fade-in 0.12s ease-out;
+  backdrop-filter: blur(2px);
+}
+
+@keyframes modal-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.modal-window {
+  background: var(--bg-elev);
   border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 100%;
+  max-width: 1200px;
+  height: min(90vh, 800px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  flex-shrink: 0;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.modal-close {
+  margin-left: auto;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 1.5rem;
+  line-height: 1;
+  padding: 2px 10px;
   border-radius: var(--radius);
-  padding: 8px 10px;
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-  font-size: 0.72rem;
-  line-height: 1.4;
+  border: 1px solid transparent;
+}
+.modal-close:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--bg);
+  border-color: var(--border);
+  filter: none;
+}
+
+.modal-log {
+  flex: 1;
+  background: #0a0f14;
   color: #c5d2dc;
-  max-height: 280px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  padding: 16px 20px;
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-all;
 }
-.train-log > div {
+.modal-log > div {
   padding: 1px 0;
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  flex-shrink: 0;
+}
+
+/* ---- Danger zone (Reset model) ---- */
+
+.train-danger {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.train-danger h4 {
+  margin: 0 0 8px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--error);
+  opacity: 0.85;
+}
+.danger-button {
+  background: transparent;
+  color: var(--error);
+  border: 1px solid var(--error);
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+.danger-button:hover:not(:disabled) {
+  background: var(--error);
+  color: var(--accent-dark);
+  filter: none;
+}
+.danger-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }

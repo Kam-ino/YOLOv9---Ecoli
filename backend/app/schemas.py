@@ -64,6 +64,10 @@ class DatasetEntryWithBoxes(BaseModel):
     boxes: List[LabelBox]
 
 
+class AddClassRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=50)
+
+
 # ---------------------------------------------------------------------------
 # Training endpoints
 # ---------------------------------------------------------------------------

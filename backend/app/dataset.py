@@ -265,6 +265,11 @@ class DatasetStore:
 _LABEL_VOCAB_PATH = Path("training/dataset.yaml")
 _FALLBACK_LABEL_CLASSES: List[str] = ["ecoli"]
 
+# Class names end up in YOLO label files, dataset.yaml, and URLs (e.g.
+# the entries list in the sidebar). Restrict to a safe character set so
+# we never have to think about escaping.
+_CLASS_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
 
 def load_label_classes() -> List[str]:
     """Read the labeling vocabulary, with a sensible fallback."""
@@ -282,6 +287,61 @@ def load_label_classes() -> List[str]:
     except Exception as exc:
         log.warning("Could not parse %s: %s", _LABEL_VOCAB_PATH, exc)
     return list(_FALLBACK_LABEL_CLASSES)
+
+
+def add_label_class(name: str) -> List[str]:
+    """Append ``name`` to the labeling vocabulary in ``training/dataset.yaml``.
+
+    Bootstraps the file if it doesn't exist yet (so the user doesn't
+    have to start from a manual template just to add a second class).
+
+    Raises:
+        ValueError: name is empty, malformed, or already present.
+
+    Returns the new full class list.
+    """
+    name = name.strip()
+    if not name:
+        raise ValueError("Class name cannot be empty.")
+    if not _CLASS_NAME_RE.match(name):
+        raise ValueError(
+            f"Invalid class name {name!r}: only letters, digits, '.', "
+            f"'_' and '-' allowed (no spaces or slashes)."
+        )
+    if len(name) > 50:
+        raise ValueError("Class name too long (max 50 chars).")
+
+    current = load_label_classes()
+    if name in current:
+        raise ValueError(f"Class {name!r} already exists.")
+    new_list = current + [name]
+
+    # Preserve any existing keys (path, train, val, test, download, ...)
+    # by round-tripping through yaml; only replace `names`. Comments are
+    # lost in the round trip — acceptable trade-off for not pulling in
+    # ruamel.yaml just for this.
+    if _LABEL_VOCAB_PATH.exists():
+        with _LABEL_VOCAB_PATH.open("r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+    else:
+        # Mirror what _ensure_dataset_yaml writes on first training run
+        # so the trainer can still consume the file.
+        dataset_root = (Path.cwd() / "data" / "ecoli").resolve()
+        data = {
+            "path": str(dataset_root),
+            "train": "images/train",
+            "val": "images/val",
+            "test": "images/test",
+        }
+
+    data["names"] = {i: n for i, n in enumerate(new_list)}
+
+    _LABEL_VOCAB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _LABEL_VOCAB_PATH.open("w", encoding="utf-8") as fh:
+        yaml.safe_dump(data, fh, sort_keys=False)
+
+    log.info("Added label class %r. Vocabulary: %s", name, new_list)
+    return new_list
 
 
 # ---------------------------------------------------------------------------

@@ -1,13 +1,26 @@
 import { useEffect, useState } from 'react'
+import { BrowserRouter, NavLink, Route, Routes, Navigate } from 'react-router-dom'
 import { fetchHealth, type HealthInfo } from './api'
 import UploadView from './UploadView'
 import LiveView from './LiveView'
 import LabelView from './LabelView'
 
-type Tab = 'upload' | 'live' | 'label'
-
+// Routes:
+//   /         → Upload image  (also matches any unknown path → fallback)
+//   /live     → Live stream
+//   /train    → Label & train
+//
+// Direct loads of /train work both locally (Vite's history-API fallback)
+// and in production on Vercel (vercel.json rewrites /(.*) → /index.html).
 export default function App() {
-  const [tab, setTab] = useState<Tab>('upload')
+  return (
+    <BrowserRouter>
+      <Shell />
+    </BrowserRouter>
+  )
+}
+
+function Shell() {
   const [health, setHealth] = useState<HealthInfo | null>(null)
   const [healthError, setHealthError] = useState<string | null>(null)
 
@@ -25,24 +38,34 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <h1>E. coli Detection</h1>
+        <NavLink to="/" className="brand">
+          <h1>E. coli Detection</h1>
+        </NavLink>
         <HealthBadge health={health} error={healthError} />
       </header>
       <nav className="tabs">
-        <button className={tab === 'upload' ? 'active' : ''} onClick={() => setTab('upload')}>
-          Upload image
-        </button>
-        <button className={tab === 'live' ? 'active' : ''} onClick={() => setTab('live')}>
-          Live stream
-        </button>
-        <button className={tab === 'label' ? 'active' : ''} onClick={() => setTab('label')}>
-          Label & train
-        </button>
+        <NavLink
+          to="/"
+          end
+          className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+        >Upload image</NavLink>
+        <NavLink
+          to="/live"
+          className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+        >Live stream</NavLink>
+        <NavLink
+          to="/train"
+          className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+        >Label & train</NavLink>
       </nav>
       <main className="content">
-        {tab === 'upload' && <UploadView />}
-        {tab === 'live' && <LiveView />}
-        {tab === 'label' && <LabelView />}
+        <Routes>
+          <Route path="/" element={<UploadView />} />
+          <Route path="/live" element={<LiveView />} />
+          <Route path="/train" element={<LabelView />} />
+          {/* Anything else falls back to the home page. */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </main>
     </div>
   )

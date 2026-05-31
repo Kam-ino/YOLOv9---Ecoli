@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   SPLITS,
+  addLabelClass,
   colorForClass,
   deleteDatasetEntry,
   fetchDatasetList,
@@ -141,6 +142,29 @@ export default function LabelView() {
     }
   }, [refreshDataset])
 
+  const onAddClass = useCallback(async () => {
+    // window.prompt is plain but it's the right tool here — single
+    // short input, no rich validation needed (backend enforces).
+    const raw = window.prompt(
+      "New class name?\n\n" +
+      "Letters, digits, '.', '_' and '-' only. No spaces or slashes.\n" +
+      "Example: ecoli_cluster",
+    )
+    if (raw === null) return
+    const name = raw.trim()
+    if (!name) return
+    try {
+      const updated = await addLabelClass(name)
+      setClasses(updated)
+      // Select the newly added class so the next box uses it.
+      const newId = updated.indexOf(name)
+      if (newId >= 0) setClassId(newId)
+      setMessage(`Added class ${name} (id ${newId}).`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
   return (
     <div className="label-view">
       <div className="label-controls">
@@ -188,6 +212,19 @@ export default function LabelView() {
               <option key={i} value={i}>{i}: {c}</option>
             ))}
           </select>
+          <button
+            type="button"
+            onClick={onAddClass}
+            title="Add a new class to the labelling vocabulary"
+            style={{
+              background: 'var(--bg-elev-2)',
+              color: 'var(--fg)',
+              padding: '4px 10px',
+              fontSize: '1rem',
+              lineHeight: 1,
+              border: '1px solid var(--border)',
+            }}
+          >+</button>
         </label>
 
         <label className="conf-filter">
