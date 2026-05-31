@@ -39,6 +39,7 @@ preprocessing:
 # Class names. Index order matters and must match the trained model.
 classes:
   - ecoli
+  - ecoli_cluster
 
 logging:
   level: INFO               # DEBUG | INFO | WARNING | ERROR
