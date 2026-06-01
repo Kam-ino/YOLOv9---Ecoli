@@ -1,0 +1,7 @@
+cd ~/YOLOv9-Ecoli
+rm -rf .venv frontend/node_modules frontend/dist backend/app/static runs logs/*.log
+sudo apt update && sudo apt install -y python3 python3-venv python3-pip python3-full nodejs npm
+sed -i 's/\r$//' start.sh deploy/install-service.sh
+sed -i "s|^path: .*|path: $(pwd)/data/ecoli|" training/dataset.yaml
+chmod +x start.sh deploy/install-service.sh
+./start.sh
