@@ -40,6 +40,8 @@ preprocessing:
 classes:
   - ecoli
   - ecoli_cluster
+  - ecoli_unstained
+  - cluster_unstained
 
 logging:
   level: INFO               # DEBUG | INFO | WARNING | ERROR

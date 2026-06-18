@@ -357,6 +357,12 @@ def create_app() -> FastAPI:
             description="Run inference once every N frames; reuse last boxes "
                         "for intermediate frames. Trades box freshness for FPS.",
         ),
+        min_conf: float = Query(
+            0.0, ge=0.0, le=1.0,
+            description="Drop detections below this confidence before drawing. "
+                        "An additional UI floor on top of the model's own "
+                        "conf_threshold — only ever raises it.",
+        ),
     ) -> StreamingResponse:
         if not service.is_ready:
             raise HTTPException(status_code=503, detail="Detector not initialised.")
@@ -369,7 +375,10 @@ def create_app() -> FastAPI:
             src_val = source
 
         return StreamingResponse(
-            _mjpeg_generator(src_val, annotate=annotate, infer_every=infer_every),
+            _mjpeg_generator(
+                src_val, annotate=annotate, infer_every=infer_every,
+                min_conf=min_conf,
+            ),
             media_type="multipart/x-mixed-replace; boundary=frame",
         )
 
@@ -473,9 +482,10 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Empty image upload.")
 
         if not filename:
-            # Snapshots arrive without a filename; pick a timestamp stem.
-            # Extension will be normalised to .png below regardless.
-            filename = f"img_{int(time.time() * 1000)}.png"
+            # Live-feed snapshots arrive without a filename. Name them
+            # MicroscopeCapture(N).png with the next free N across all
+            # splits. Extension is normalised to .png below regardless.
+            filename = get_store().next_capture_name()
 
         # Normalise upload → clean cv2-readable PNG. This is what
         # prevents PNGs that only Pillow can decode (16-bit, palette,
@@ -662,6 +672,7 @@ def _mjpeg_generator(
     source: Union[int, str],
     annotate: bool,
     infer_every: int = 1,
+    min_conf: float = 0.0,
 ) -> Iterator[bytes]:
     """Yield multipart/MJPEG frames; optionally annotate each frame in-process.
 
@@ -711,6 +722,10 @@ def _mjpeg_generator(
                     if (frame_idx - 1) % infer_every == 0:
                         with service.lock:
                             raw = service.detector.predict(frame)
+                        # UI confidence floor: drop weak detections before
+                        # they reach the cluster-merge / draw stages.
+                        if min_conf > 0.0:
+                            raw = [d for d in raw if d.confidence >= min_conf]
                         # Cluster-merge so the live stream behaves the
                         # same as the upload tab. Applied per inference,
                         # not per displayed frame.

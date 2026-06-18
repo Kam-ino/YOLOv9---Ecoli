@@ -56,6 +56,10 @@ class DatasetStats(BaseModel):
     classes: List[str]
     splits: Dict[str, DatasetSplitStats]
     totals: DatasetSplitStats
+    # Total box count per class name, across all splits. Includes a
+    # "cls_<id>" entry for any label whose class id isn't in the current
+    # vocabulary (e.g. left over from a renamed/removed class).
+    per_class: Dict[str, int]
 
 
 class DatasetEntryWithBoxes(BaseModel):

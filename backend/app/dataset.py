@@ -32,7 +32,10 @@ VALID_SPLITS = ("train", "val", "test")
 # hard to a safe character set. The Label UI generates timestamps that
 # satisfy this; user-uploaded names are sanitised by the route. Spaces
 # are permitted so the " - N" collision suffix produces readable names.
-_FILENAME_RE = re.compile(r"^[A-Za-z0-9 ._-]+$")
+# Parentheses are permitted so snapshot captures can be named
+# "MicroscopeCapture(N).png" — they're safe on disk and pass through
+# encodeURIComponent unescaped.
+_FILENAME_RE = re.compile(r"^[A-Za-z0-9 ()._-]+$")
 
 
 class DatasetStore:
@@ -79,6 +82,23 @@ class DatasetStore:
         # millions of entries. In practice it terminates almost immediately.
         while True:
             candidate = f"{stem} - {n}{suffix}"
+            if not self._exists_in_any_split(candidate):
+                return candidate
+            n += 1
+
+    def next_capture_name(
+        self, prefix: str = "MicroscopeCapture", ext: str = ".png",
+    ) -> str:
+        """Return the next free ``MicroscopeCapture(N){ext}`` name.
+
+        Used to name live-feed snapshots that arrive without a filename.
+        Scans across all splits and starts from 1, re-using gaps left by
+        deletes (so the numbers stay small in normal use) — mirroring
+        :meth:`unique_filename`'s behaviour.
+        """
+        n = 1
+        while True:
+            candidate = f"{prefix}({n}){ext}"
             if not self._exists_in_any_split(candidate):
                 return candidate
             n += 1
@@ -235,8 +255,11 @@ class DatasetStore:
         return None
 
     def stats(self) -> DatasetStats:
+        classes = load_label_classes()
         per_split = {}
         total_images = total_boxes = 0
+        # Tally boxes per class id across all splits.
+        class_counts: dict[int, int] = {}
         for s in VALID_SPLITS:
             img_dir = self.root / "images" / s
             if not img_dir.is_dir():
@@ -247,10 +270,24 @@ class DatasetStore:
             per_split[s] = DatasetSplitStats(images=len(images), boxes=boxes)
             total_images += len(images)
             total_boxes += boxes
+            for img in images:
+                for box in self.read_labels(img.name, s):
+                    class_counts[box.class_id] = class_counts.get(box.class_id, 0) + 1
+
+        # Resolve ids → names. Known ids use the vocabulary; ids past the
+        # end (renamed/removed classes) fall back to "cls_<id>". Every
+        # vocabulary class appears even if it has zero boxes, so the UI
+        # can show a complete, stable list.
+        per_class: dict[str, int] = {name: 0 for name in classes}
+        for cid, count in class_counts.items():
+            name = classes[cid] if 0 <= cid < len(classes) else f"cls_{cid}"
+            per_class[name] = per_class.get(name, 0) + count
+
         return DatasetStats(
-            classes=load_label_classes(),
+            classes=classes,
             splits=per_split,
             totals=DatasetSplitStats(images=total_images, boxes=total_boxes),
+            per_class=per_class,
         )
 
 

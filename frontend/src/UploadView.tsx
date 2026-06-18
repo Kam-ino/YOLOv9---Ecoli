@@ -3,38 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import {
   predict,
   colorForClass,
+  detectionsToLabelBoxes,
   type Detection,
   type LabelBox,
   type PredictResponse,
 } from './api'
 import { mergeClusters, type MergeParams } from './clusterMerge'
 import DetectionOverlay from './DetectionOverlay'
-
-
-// Convert a model detection (pixel xyxy + class_id) into the YOLO-format
-// LabelBox the labelling UI uses (normalized cx/cy/w/h). Detections that
-// somehow have w or h ≤ 0 are dropped so they don't crash the canvas.
-function detectionsToLabelBoxes(
-  detections: Detection[],
-  imageW: number,
-  imageH: number,
-): LabelBox[] {
-  const boxes: LabelBox[] = []
-  for (const d of detections) {
-    const [x1, y1, x2, y2] = d.bbox
-    const w = (x2 - x1) / imageW
-    const h = (y2 - y1) / imageH
-    if (w <= 0 || h <= 0) continue
-    boxes.push({
-      class_id: d.class_id,
-      cx: (x1 + (x2 - x1) / 2) / imageW,
-      cy: (y1 + (y2 - y1) / 2) / imageH,
-      w,
-      h,
-    })
-  }
-  return boxes
-}
 
 
 // Shape of the data we hand off via React Router's navigate state when

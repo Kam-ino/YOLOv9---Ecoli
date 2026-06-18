@@ -9,7 +9,7 @@ import {
   fetchDatasetStats,
   fetchLabelClasses,
   saveDatasetEntry,
-  snapshotImage,
+  streamUrl,
   type DatasetEntry,
   type DatasetStats,
   type LabelBox,
@@ -31,6 +31,14 @@ export default function LabelView() {
   // ---- current image being labelled ---------------------------------------
   const [sourceMode, setSourceMode] = useState<SourceMode>('upload')
   const [snapshotSource, setSnapshotSource] = useState('0')
+  // Live MJPEG preview shown in Snapshot mode before a frame is grabbed.
+  // Bumping liveBust forces a fresh stream connection (on mode switch,
+  // source change, or "New image"). liveReady gates the Capture button
+  // until the <img> has decoded at least one frame.
+  const liveImgRef = useRef<HTMLImageElement>(null)
+  const [liveBust, setLiveBust] = useState(0)
+  const [liveReady, setLiveReady] = useState(false)
+  const [liveError, setLiveError] = useState<string | null>(null)
   const [imageBlob, setImageBlob] = useState<Blob | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [imageName, setImageName] = useState<string | null>(null)
@@ -116,17 +124,60 @@ export default function LabelView() {
     [setSource],
   )
 
-  const onSnapshot = useCallback(async () => {
-    setBusy(true); setError(null); setMessage(null)
-    try {
-      const blob = await snapshotImage(snapshotSource)
-      setSource(blob, null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
+  // Grab the frame currently showing in the live preview <img>. We draw
+  // it to a canvas client-side rather than calling /api/snapshot: the
+  // preview already holds the camera open, so a server-side snapshot of
+  // the same device would fail with "device busy". The preview runs with
+  // annotate=false, so the captured frame is raw (no boxes/HUD baked in).
+  const onCaptureFromLive = useCallback(() => {
+    setError(null); setMessage(null)
+    const img = liveImgRef.current
+    if (!img || !img.naturalWidth || !img.naturalHeight) {
+      setError('Live feed not ready yet — give it a moment to connect.')
+      return
     }
-  }, [snapshotSource, setSource])
+    const canvas = document.createElement('canvas')
+    canvas.width = img.naturalWidth
+    canvas.height = img.naturalHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) { setError('Could not get a canvas context.'); return }
+    ctx.drawImage(img, 0, 0)
+    canvas.toBlob((blob) => {
+      if (blob) setSource(blob, null)
+      else setError('Could not capture the current frame.')
+    }, 'image/png')
+  }, [setSource])
+
+  // (Re)connect the live preview whenever we enter snapshot mode or the
+  // source changes, resetting the per-connection ready / error flags.
+  useEffect(() => {
+    if (sourceMode !== 'snapshot') return
+    setLiveReady(false)
+    setLiveError(null)
+    setLiveBust((b) => b + 1)
+  }, [sourceMode, snapshotSource])
+
+  // Press "P" to capture the current live frame. Only fires while the
+  // preview is actually showing (snapshot mode, no frame grabbed yet,
+  // stream ready) and never while typing in a field or using a modifier
+  // chord (so Ctrl/Cmd+P → print still works).
+  useEffect(() => {
+    const canCapture =
+      sourceMode === 'snapshot' && !imageUrl && liveReady
+    if (!canCapture) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'p' && e.key !== 'P') return
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const el = e.target as HTMLElement | null
+      const tag = el?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+          el?.isContentEditable) return
+      e.preventDefault()
+      onCaptureFromLive()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sourceMode, imageUrl, liveReady, onCaptureFromLive])
 
   const onClearBoxes = useCallback(() => setBoxes([]), [])
 
@@ -161,6 +212,10 @@ export default function LabelView() {
     setImageBlob(null); setImageUrl(null); setImageName(null); setBoxes([])
     setMessage(null); setError(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
+    // Force a fresh live-preview connection so we don't reuse a stale,
+    // possibly-disconnected stream after labelling the captured frame.
+    setLiveReady(false); setLiveError(null)
+    setLiveBust((b) => b + 1)
   }, [imageUrl])
 
   const onDeleteEntry = useCallback(async (entry: DatasetEntry) => {
@@ -226,8 +281,11 @@ export default function LabelView() {
               placeholder="0 or path/to/file.mp4"
               style={{ width: 240 }}
             />
-            <button onClick={onSnapshot} disabled={busy || !snapshotSource.trim()}>
-              {busy ? 'Capturing…' : 'Capture frame'}
+            <button
+              onClick={onCaptureFromLive}
+              disabled={busy || !snapshotSource.trim() || !liveReady}
+            >
+              Capture frame
             </button>
           </>
         )}
@@ -292,6 +350,38 @@ export default function LabelView() {
               classes={classes}
               onChange={setBoxes}
             />
+          ) : sourceMode === 'snapshot' && snapshotSource.trim() ? (
+            <div className="live-preview">
+              {liveError ? (
+                <div className="placeholder">
+                  <p className="error">{liveError}</p>
+                  <p className="muted small">
+                    Check the source (try <code>0</code> or <code>1</code>), make
+                    sure no other tab is holding the camera, then adjust the
+                    source field to reconnect.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <img
+                    ref={liveImgRef}
+                    className="stream-img"
+                    src={streamUrl(snapshotSource, 1, liveBust, 0, false)}
+                    alt="live preview"
+                    onLoad={() => setLiveReady(true)}
+                    onError={() => {
+                      setLiveReady(false)
+                      setLiveError('Live feed failed (camera busy / source invalid).')
+                    }}
+                  />
+                  <p className="muted small">
+                    {liveReady
+                      ? 'Live feed — click "Capture frame" or press P to grab the current frame for labelling.'
+                      : 'Connecting to the camera…'}
+                  </p>
+                </>
+              )}
+            </div>
           ) : (
             <div className="placeholder">
               <p>Pick an image to start labelling — upload one, or capture a frame from your microscope.</p>
@@ -368,6 +458,18 @@ function DatasetSummary({
             {s}: {stats.splits[s]?.images ?? 0} img / {stats.splits[s]?.boxes ?? 0} box
           </div>
         ))}
+        <div className="muted" style={{ marginTop: 8 }}>Boxes by class</div>
+        {stats.classes.map((c, i) => (
+          <div className="muted" key={c}>
+            <span className="cls-dot" style={{ background: colorForClass(i) }} />
+            {c}: {stats.per_class[c] ?? 0}
+          </div>
+        ))}
+        {Object.entries(stats.per_class)
+          .filter(([name]) => !stats.classes.includes(name))
+          .map(([name, count]) => (
+            <div className="muted" key={name}>{name}: {count}</div>
+          ))}
       </div>
       {entries.length === 0 ? (
         <p className="muted small">No saved entries yet.</p>

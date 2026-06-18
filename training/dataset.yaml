@@ -5,3 +5,5 @@ test: images/test
 names:
   0: ecoli
   1: ecoli_cluster
+  2: ecoli_unstained
+  3: cluster_unstained

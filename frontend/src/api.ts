@@ -64,10 +64,14 @@ export function streamUrl(
   source: string,
   inferEvery: number,
   cacheBust: number,
+  minConf = 0,
+  annotate = true,
 ): string {
   const params = new URLSearchParams({
     source,
     infer_every: String(inferEvery),
+    min_conf: String(minConf),
+    annotate: String(annotate),
     _t: String(cacheBust),
   })
   return api(`/api/stream?${params.toString()}`)
@@ -92,6 +96,31 @@ export type LabelBox = {
   h: number    // 0..1
 }
 
+// Convert a model detection (pixel xyxy + class_id) into the YOLO-format
+// LabelBox the labelling UI uses (normalized cx/cy/w/h). Detections with
+// non-positive width/height are dropped so they don't crash the canvas.
+export function detectionsToLabelBoxes(
+  detections: Detection[],
+  imageW: number,
+  imageH: number,
+): LabelBox[] {
+  const boxes: LabelBox[] = []
+  for (const d of detections) {
+    const [x1, y1, x2, y2] = d.bbox
+    const w = (x2 - x1) / imageW
+    const h = (y2 - y1) / imageH
+    if (w <= 0 || h <= 0) continue
+    boxes.push({
+      class_id: d.class_id,
+      cx: (x1 + (x2 - x1) / 2) / imageW,
+      cy: (y1 + (y2 - y1) / 2) / imageH,
+      w,
+      h,
+    })
+  }
+  return boxes
+}
+
 export type DatasetEntry = {
   filename: string
   split: string
@@ -106,6 +135,7 @@ export type DatasetStats = {
   classes: string[]
   splits: Record<string, DatasetSplitStats>
   totals: DatasetSplitStats
+  per_class: Record<string, number>
 }
 
 export type Split = 'train' | 'val' | 'test'
