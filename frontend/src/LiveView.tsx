@@ -23,7 +23,10 @@ async function snapshotWithRetry(
   let lastErr: unknown
   for (let i = 0; i < tries; i++) {
     try {
-      return await snapshotImage(source)
+      // clahe=true → the captured frame is contrast-enhanced like the
+      // live view (and the domain the model infers on), so it doesn't
+      // look washed-out next to the stream.
+      return await snapshotImage(source, { clahe: true })
     } catch (e) {
       lastErr = e
       await new Promise((r) => setTimeout(r, delayMs))
@@ -39,12 +42,13 @@ async function snapshotWithRetry(
 // inferEvery: run inference once every N frames; reuse last boxes in
 // between. On CPU this is the single biggest live-FPS knob.
 //
-// minConf can be changed WHILE running: the boxes are drawn server-side
-// (baked into each JPEG), so the only way to re-apply the filter is to
-// reconnect the stream with a new min_conf. `appliedConf` is the value
-// currently in the stream URL; `minConf` is the live slider value. A
-// debounce copies one to the other so dragging the slider doesn't
-// reopen the camera on every tick.
+// Min confidence and cluster-merge settings can be changed WHILE
+// running: the boxes are drawn server-side (baked into each JPEG), so
+// the only way to re-apply them is to reconnect the stream with new
+// query params. `applied` holds the values currently in the stream URL;
+// the individual states are the live slider values. A debounce copies
+// the live values into `applied` so dragging doesn't reopen the camera
+// on every tick.
 //
 // "Capture & label": freeze a clean frame, pre-fill it with the model's
 // detections, then edit (add/remove boxes) and save to the dataset —
@@ -53,6 +57,9 @@ export default function LiveView() {
   const [source, setSource] = useState('0')
   const [inferEvery, setInferEvery] = useState(3)
   const [minConf, setMinConf] = useState(0.25)
+  // The confidence currently baked into the live stream connection. A
+  // debounce copies `minConf` here so dragging doesn't reopen the camera
+  // on every tick; changing it forces a stream reconnect.
   const [appliedConf, setAppliedConf] = useState(0.25)
   const [running, setRunning] = useState(false)
   const [bust, setBust] = useState(0)
@@ -87,14 +94,18 @@ export default function LiveView() {
   }
   const stop = () => setRunning(false)
 
+  // True while the confidence slider differs from what the stream is
+  // currently using — i.e. a reconnect is pending.
+  const settingsDirty = running && minConf !== appliedConf
+
   // While running, debounce slider changes into the stream URL: 350ms
   // after the last adjustment, reconnect with the new threshold. The
-  // URL's min_conf param changing is what triggers the <img> reconnect.
+  // changed query param is what triggers the <img> to reconnect.
   useEffect(() => {
-    if (!running || minConf === appliedConf) return
+    if (!settingsDirty) return
     const id = setTimeout(() => setAppliedConf(minConf), 350)
     return () => clearTimeout(id)
-  }, [minConf, appliedConf, running])
+  }, [settingsDirty, minConf])
 
   // Freeze the current frame for labelling. Setting busy unmounts the
   // stream <img> (see the render gate), which releases the camera so the
@@ -110,9 +121,15 @@ export default function LiveView() {
       })
       let boxes: LabelBox[] = []
       try {
-        const res = await predict(file, { merge: true })
+        // preprocess=false → the snapshot is already CLAHE-enhanced, so
+        // don't let predict apply CLAHE a second time.
+        const res = await predict(file, { preprocess: false })
+        // Only pre-fill detections that pass the Min confidence slider —
+        // same threshold the live overlay uses. Without this the canvas
+        // floods with every weak box down to the model's 0.01 floor.
+        const kept = res.detections.filter((d) => d.confidence >= minConf)
         boxes = detectionsToLabelBoxes(
-          res.detections, res.image_size[0], res.image_size[1],
+          kept, res.image_size[0], res.image_size[1],
         )
       } catch {
         // Detection failed — fall back to a blank canvas.
@@ -127,7 +144,7 @@ export default function LiveView() {
     } finally {
       setBusy(false)
     }
-  }, [source, editUrl])
+  }, [source, editUrl, minConf])
 
   const deleteBox = useCallback((idx: number) => {
     setEditBoxes((prev) => prev.filter((_, i) => i !== idx))
@@ -218,6 +235,9 @@ export default function LiveView() {
               <div className="muted">Class: {classes[classId] ?? `cls_${classId}`}</div>
               <div className="muted">Split: {split}</div>
               <div className="muted small">
+                Pre-filled with detections ≥ {minConf.toFixed(2)} confidence.
+              </div>
+              <div className="muted small">
                 Drag on the image to add a box (in the selected class). Delete below.
               </div>
               {editBoxes.length > 0 && (
@@ -278,7 +298,7 @@ export default function LiveView() {
         <label className="conf-filter">
           <span>
             Min confidence <strong>{minConf.toFixed(2)}</strong>
-            {running && minConf !== appliedConf && (
+            {settingsDirty && (
               <span className="muted small"> · applying…</span>
             )}
           </span>
@@ -312,7 +332,7 @@ export default function LiveView() {
         ) : running ? (
           <img
             className="stream-img"
-            src={streamUrl(source, inferEvery, bust, appliedConf)}
+            src={streamUrl(source, inferEvery, bust, { minConf: appliedConf })}
             alt="live stream"
             onError={() => {
               setError('Stream ended or failed (camera busy / source invalid).')

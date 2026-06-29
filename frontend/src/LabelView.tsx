@@ -366,7 +366,7 @@ export default function LabelView() {
                   <img
                     ref={liveImgRef}
                     className="stream-img"
-                    src={streamUrl(snapshotSource, 1, liveBust, 0, false)}
+                    src={streamUrl(snapshotSource, 1, liveBust, { minConf: 0, annotate: false })}
                     alt="live preview"
                     onLoad={() => setLiveReady(true)}
                     onError={() => {

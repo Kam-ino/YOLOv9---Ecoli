@@ -45,14 +45,16 @@ export async function fetchHealth(): Promise<HealthInfo> {
 
 export async function predict(
   file: File,
-  opts: { merge?: boolean } = {},
+  opts: { preprocess?: boolean } = {},
 ): Promise<PredictResponse> {
   const fd = new FormData()
   fd.append('file', file)
-  // merge=false → backend returns raw detections so client sliders can
-  // re-merge on the fly without re-running the model on each tick.
-  const merge = opts.merge ?? true
-  const r = await fetch(api(`/api/predict?merge=${merge}`), { method: 'POST', body: fd })
+  // preprocess=false → image is already CLAHE-enhanced; don't double-apply.
+  const preprocess = opts.preprocess ?? true
+  const r = await fetch(
+    api(`/api/predict?preprocess=${preprocess}`),
+    { method: 'POST', body: fd },
+  )
   if (!r.ok) {
     const text = await r.text().catch(() => '')
     throw new Error(`/api/predict → ${r.status}: ${text || r.statusText}`)
@@ -60,20 +62,24 @@ export async function predict(
   return r.json()
 }
 
+export type StreamOpts = {
+  minConf?: number
+  annotate?: boolean
+}
+
 export function streamUrl(
   source: string,
   inferEvery: number,
   cacheBust: number,
-  minConf = 0,
-  annotate = true,
+  opts: StreamOpts = {},
 ): string {
   const params = new URLSearchParams({
     source,
     infer_every: String(inferEvery),
-    min_conf: String(minConf),
-    annotate: String(annotate),
     _t: String(cacheBust),
   })
+  if (opts.minConf != null) params.set('min_conf', String(opts.minConf))
+  if (opts.annotate != null) params.set('annotate', String(opts.annotate))
   return api(`/api/stream?${params.toString()}`)
 }
 
@@ -219,9 +225,14 @@ export async function deleteDatasetEntry(split: Split, filename: string): Promis
   if (!r.ok) throw new Error(`delete → ${r.status}`)
 }
 
-export async function snapshotImage(source: string): Promise<Blob> {
+export async function snapshotImage(
+  source: string,
+  opts: { clahe?: boolean } = {},
+): Promise<Blob> {
+  const params = new URLSearchParams({ source })
+  if (opts.clahe) params.set('clahe', 'true')
   const r = await fetch(
-    api(`/api/snapshot?source=${encodeURIComponent(source)}`),
+    api(`/api/snapshot?${params.toString()}`),
     { method: 'POST' },
   )
   if (!r.ok) {

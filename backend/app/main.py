@@ -37,13 +37,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from src.capture import CaptureError, VideoSource
-from src.config import AppConfig
-from src.inference import Detection
 from src.logging_setup import setup_logging
 from src.preprocessing import apply_clahe
 from src.visualization import draw_detections, draw_hud
 
-from .cluster_merge import merge_clusters
 from .dataset import (
     VALID_SPLITS, add_label_class, get_store, init_store, load_label_classes,
 )
@@ -76,53 +73,6 @@ async def lifespan(_app: FastAPI):
     init_store(dataset_root)
     yield
     log.info("Lifespan shutdown.")
-
-
-# ---------------------------------------------------------------------------
-# Cluster-merge post-processing
-# ---------------------------------------------------------------------------
-
-def _apply_cluster_merge(
-    detections: List[Detection],
-    image_size: tuple,
-    cfg: AppConfig,
-) -> List[Detection]:
-    """Apply the configured cluster-merge pass, or pass detections through.
-
-    Resolves source/target class names → ids against ``cfg.classes``.
-    If the source class isn't in the vocabulary, the merge is a no-op
-    (we don't want to fail open when the user hasn't configured it).
-    If the target class isn't in the vocabulary, we synthesize an id
-    one past the end so the frontend palette picks a distinct colour.
-    """
-    cm = cfg.cluster_merge
-    if not cm.enabled:
-        return detections
-
-    if cm.source_class_name not in cfg.classes:
-        log.warning(
-            "cluster_merge: source class %r not in config.classes %s — skipping.",
-            cm.source_class_name, cfg.classes,
-        )
-        return detections
-    source_id = cfg.classes.index(cm.source_class_name)
-
-    if cm.target_class_name in cfg.classes:
-        target_id = cfg.classes.index(cm.target_class_name)
-    else:
-        # One past the end — colour palette wraps so this still gets a
-        # consistent (different) hue per render.
-        target_id = len(cfg.classes)
-
-    return merge_clusters(
-        detections,
-        image_size=image_size,
-        source_class_id=source_id,
-        target_class_id=target_id,
-        target_class_name=cm.target_class_name,
-        margin_frac=cm.margin,
-        min_size=cm.min_size,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -290,12 +240,12 @@ def create_app() -> FastAPI:
     @app.post("/api/predict", response_model=PredictResponse)
     async def predict(
         file: UploadFile = File(...),
-        merge: bool = Query(
+        preprocess: bool = Query(
             True,
             description=(
-                "Apply the server-side cluster-merge pass. Set false when "
-                "the client wants raw detections to drive its own merge "
-                "(e.g. the Upload tab's live sliders)."
+                "Apply CLAHE before inference. Set false when the uploaded "
+                "image is already CLAHE-enhanced (e.g. a snapshot captured "
+                "with clahe=true) so it isn't enhanced twice."
             ),
         ),
     ) -> PredictResponse:
@@ -314,7 +264,7 @@ def create_app() -> FastAPI:
             )
 
         cfg = service.config
-        if cfg.preprocessing.apply_clahe:
+        if preprocess and cfg.preprocessing.apply_clahe:
             frame = apply_clahe(
                 frame,
                 clip_limit=cfg.preprocessing.clahe_clip_limit,
@@ -326,11 +276,6 @@ def create_app() -> FastAPI:
             t0 = time.perf_counter()
             dets = service.detector.predict(frame)
             inference_ms = (time.perf_counter() - t0) * 1000.0
-
-        # Post-processing pass: collapse dense ecoli clusters if enabled
-        # (and unless the caller has opted out to do it themselves).
-        if merge:
-            dets = _apply_cluster_merge(dets, image_size=(w, h), cfg=cfg)
 
         return PredictResponse(
             detections=[
@@ -385,13 +330,24 @@ def create_app() -> FastAPI:
     # -- /api/snapshot -------------------------------------------------------
 
     @app.post("/api/snapshot")
-    def snapshot(source: str = Query("0")) -> Response:
+    def snapshot(
+        source: str = Query("0"),
+        clahe: bool = Query(
+            False,
+            description=(
+                "Apply the same CLAHE enhancement the live stream uses, so "
+                "the captured frame matches what you see live (and the "
+                "domain the model runs inference on)."
+            ),
+        ),
+    ) -> Response:
         """Open the source, grab one frame, return as JPEG.
 
         Useful for labelling: gives a static still you can draw boxes on.
         The configured capture.width/height/fps from config.yaml apply.
-        Returns 503 if the device is busy (e.g. /api/stream is already
-        holding it) or fails to read.
+        With ``clahe=true`` the frame is contrast-enhanced exactly like the
+        live MJPEG stream. Returns 503 if the device is busy (e.g.
+        /api/stream is already holding it) or fails to read.
         """
         if not service.is_ready:
             raise HTTPException(status_code=503, detail="Detector not initialised.")
@@ -421,6 +377,13 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=503,
                 detail="Could not read a frame from the source.",
+            )
+
+        if clahe and cfg.preprocessing.apply_clahe:
+            frame = apply_clahe(
+                frame,
+                clip_limit=cfg.preprocessing.clahe_clip_limit,
+                tile_grid_size=cfg.preprocessing.clahe_tile_grid_size,
             )
 
         ok, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
@@ -667,6 +630,37 @@ def create_app() -> FastAPI:
 # finished.
 _MAX_CONSECUTIVE_READ_FAILURES = 30
 
+# When a live control changes, the browser drops the old MJPEG <img>
+# connection and opens a new one with new query params. The new stream
+# can briefly find the camera still held by the closing connection.
+# Retry the open over ~2s so the reconnect waits for the device to free
+# up instead of coming up to a permanently blank feed.
+_STREAM_OPEN_ATTEMPTS = 10
+_STREAM_OPEN_RETRY_DELAY = 0.2
+
+
+def _open_source_with_retry(source: Union[int, str]) -> VideoSource:
+    """Open ``source`` as a VideoSource, retrying briefly on CaptureError.
+
+    Returns an already-entered VideoSource (caller must ``__exit__`` it).
+    Raises the last CaptureError if every attempt fails.
+    """
+    cfg = service.config
+    last_exc: Optional[CaptureError] = None
+    for attempt in range(_STREAM_OPEN_ATTEMPTS):
+        vs = VideoSource(
+            source, cfg.capture.width, cfg.capture.height, cfg.capture.fps,
+        )
+        try:
+            vs.__enter__()
+            return vs
+        except CaptureError as exc:
+            last_exc = exc
+            if attempt < _STREAM_OPEN_ATTEMPTS - 1:
+                time.sleep(_STREAM_OPEN_RETRY_DELAY)
+    assert last_exc is not None
+    raise last_exc
+
 
 def _mjpeg_generator(
     source: Union[int, str],
@@ -689,12 +683,8 @@ def _mjpeg_generator(
     frame_idx = 0
 
     try:
-        with VideoSource(
-            source,
-            cfg.capture.width,
-            cfg.capture.height,
-            cfg.capture.fps,
-        ) as cap:
+        cap = _open_source_with_retry(source)
+        try:
             while True:
                 t0 = time.perf_counter()
                 ok, frame = cap.read()
@@ -723,16 +713,10 @@ def _mjpeg_generator(
                         with service.lock:
                             raw = service.detector.predict(frame)
                         # UI confidence floor: drop weak detections before
-                        # they reach the cluster-merge / draw stages.
+                        # they reach the draw stage.
                         if min_conf > 0.0:
                             raw = [d for d in raw if d.confidence >= min_conf]
-                        # Cluster-merge so the live stream behaves the
-                        # same as the upload tab. Applied per inference,
-                        # not per displayed frame.
-                        fh, fw = frame.shape[:2]
-                        last_dets = _apply_cluster_merge(
-                            raw, image_size=(fw, fh), cfg=cfg,
-                        )
+                        last_dets = raw
                     draw_detections(frame, last_dets)
                     dt = time.perf_counter() - t0
                     if dt > 0:
@@ -755,6 +739,11 @@ def _mjpeg_generator(
                     + jpg.tobytes()
                     + b"\r\n"
                 )
+        finally:
+            # Always release the device when the loop ends (client
+            # disconnect, read failures, mid-stream error) so a reconnect
+            # can reacquire it promptly.
+            cap.__exit__(None, None, None)
     except CaptureError as exc:
         # The generator can't raise HTTP errors after headers are sent;
         # the browser will see the connection close.
