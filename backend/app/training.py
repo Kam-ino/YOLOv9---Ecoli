@@ -221,8 +221,52 @@ class TrainingService:
                 self._return_code = rc
                 if self._state == "running":
                     self._state = "completed" if rc == 0 else "failed"
+                completed_ok = self._state == "completed"
+                name = self._name
             log.info("Training process exited with code %d (state=%s)",
                      rc, self._state)
+            # On a clean finish, auto-deploy the run's best.pt as the
+            # active model so inference uses it without a manual copy /
+            # restart. Failures here are logged but never crash the reader.
+            if completed_ok and name:
+                self._auto_activate_best(name)
+
+    # ----------------------------------------------------------------------
+
+    def _find_best_weights(self, name: str) -> Optional[Path]:
+        """Locate ``best.pt`` for a finished run by its (unique) name.
+
+        Ultralytics nests the run dir differently depending on its global
+        settings, so we glob the repo for ``**/<name>/weights/best.pt``
+        rather than hard-coding a path, and take the newest match.
+        """
+        matches = list(_REPO_ROOT.glob(f"**/{name}/weights/best.pt"))
+        if not matches:
+            return None
+        return max(matches, key=lambda p: p.stat().st_mtime)
+
+    def _auto_activate_best(self, name: str) -> None:
+        """Copy the finished run's best.pt over the active model + reload."""
+        # Imported here (not at module top) to avoid a request-time import
+        # cycle and to keep the training module standalone-importable.
+        from .detector import service as detector_service
+        try:
+            best = self._find_best_weights(name)
+            if best is None:
+                msg = (f"Auto-activate: no best.pt found for run {name!r}; "
+                       f"active model left unchanged.")
+                log.warning(msg)
+                self._logs.append(f"[{msg}]")
+                return
+            info = detector_service.activate_weights(str(best))
+            msg = (f"Auto-activated best weights: {best} → "
+                   f"{info['active_weights']} (classes={info['classes']}).")
+            log.info(msg)
+            self._logs.append(f"[{msg}]")
+        except Exception as exc:  # noqa: BLE001 — never crash the reader thread
+            msg = f"Auto-activate failed: {exc!r}"
+            log.error(msg)
+            self._logs.append(f"[{msg}]")
 
     # ----------------------------------------------------------------------
 

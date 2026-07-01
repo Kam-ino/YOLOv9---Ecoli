@@ -10,6 +10,7 @@ call because Ultralytics / PyTorch are not safe under concurrent calls
 on a single model instance.
 """
 import logging
+import shutil
 import time
 from pathlib import Path
 from threading import Lock
@@ -68,6 +69,60 @@ class DetectorService:
         return self._lock
 
     # ------------------------------------------------------------------
+
+    def activate_weights(self, weights_path: str) -> Dict[str, Any]:
+        """Copy freshly-trained weights over the active model path and
+        hot-reload the detector from them.
+
+        Used to auto-deploy the ``best.pt`` of a finished training run:
+          * The current active model (``model.weights`` in config) is
+            backed up to ``<stem>.bak-<unix_ts><suffix>`` so you can roll
+            back, unless it's already the same file.
+          * ``weights_path`` is copied into the active path and the
+            detector is rebuilt from it.
+
+        Held under ``self._lock`` so any in-flight ``predict()`` finishes
+        before the swap and no inference runs against a half-loaded model.
+        """
+        if self._cfg is None:
+            raise RuntimeError("DetectorService.init() has not been called.")
+
+        src = Path(weights_path)
+        if not src.is_file():
+            raise FileNotFoundError(f"No weights to activate at {src}.")
+
+        with self._lock:
+            target = Path(self._cfg.model.weights)
+            target.parent.mkdir(parents=True, exist_ok=True)
+
+            backup_path: Optional[Path] = None
+            if target.exists() and target.resolve() != src.resolve():
+                ts = int(time.time())
+                backup_path = target.with_name(
+                    f"{target.stem}.bak-{ts}{target.suffix}"
+                )
+                shutil.copy2(target, backup_path)
+                log.info("Backed up active model %s → %s", target, backup_path)
+
+            shutil.copy2(src, target)
+            log.info("Activated trained weights %s → %s", src, target)
+
+            self._detector = YOLOv9Detector(
+                weights_path=str(target),
+                device=self._cfg.model.device,
+                imgsz=self._cfg.model.imgsz,
+                conf_threshold=self._cfg.model.conf_threshold,
+                iou_threshold=self._cfg.model.iou_threshold,
+                class_names=self._cfg.classes,
+            )
+            log.info("Detector reloaded from activated weights.")
+
+            return {
+                "backup": str(backup_path) if backup_path else None,
+                "active_weights": str(target),
+                "classes": list(self._detector.class_names),
+                "device": self._detector.device,
+            }
 
     def reset(self) -> Dict[str, Any]:
         """Move the fine-tuned weights to a .bak file and reload from base.

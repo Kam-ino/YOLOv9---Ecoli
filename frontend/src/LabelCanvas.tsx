@@ -7,9 +7,10 @@ import { colorForClass } from './api'
 //   * The SVG overlay sits exactly on top of the image and uses
 //     viewBox = natural image size, so user-drawn coords map 1:1 onto
 //     image pixels regardless of how the browser scales the <img>.
-//   * Existing boxes are rendered with pointer-events:none so the user
-//     can draw new boxes that overlap previously-placed ones. Delete
-//     happens from the sidebar list.
+//   * Existing boxes are rendered with pointer-events:none so the SVG
+//     always receives the pointer events — we decide draw-vs-delete from
+//     the gesture: a drag draws a new box (even over existing ones), a
+//     click (negligible drag) on a box deletes it (via onDelete).
 //   * All emitted box coords are normalized to [0, 1] (YOLO convention).
 type Props = {
   imageUrl: string
@@ -17,9 +18,31 @@ type Props = {
   classId: number
   classes: string[]
   onChange: (boxes: LabelBox[]) => void
+  // Called with the index (into `boxes`) of a box clicked on the image.
+  // Omit to disable click-to-delete.
+  onDelete?: (index: number) => void
 }
 
-export default function LabelCanvas({ imageUrl, boxes, classId, classes, onChange }: Props) {
+// Index of the box under normalized point (x, y), or -1. When boxes
+// overlap, the smallest-area one wins (ties → the later/topmost box) so
+// clicking targets the most specific box rather than a big encloser.
+function boxAtPoint(boxes: LabelBox[], x: number, y: number): number {
+  let best = -1
+  let bestArea = Infinity
+  boxes.forEach((b, i) => {
+    const left = b.cx - b.w / 2
+    const right = b.cx + b.w / 2
+    const top = b.cy - b.h / 2
+    const bottom = b.cy + b.h / 2
+    if (x >= left && x <= right && y >= top && y <= bottom) {
+      const area = b.w * b.h
+      if (area <= bestArea) { bestArea = area; best = i }
+    }
+  })
+  return best
+}
+
+export default function LabelCanvas({ imageUrl, boxes, classId, classes, onChange, onDelete }: Props) {
   const imgRef = useRef<HTMLImageElement>(null)
   const [natural, setNatural] = useState<[number, number] | null>(null)
   const [drag, setDrag] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null)
@@ -53,6 +76,8 @@ export default function LabelCanvas({ imageUrl, boxes, classId, classes, onChang
   }
   const onPointerUp = (_e: React.PointerEvent) => {
     if (!drag) return
+    const relX = drag.x2
+    const relY = drag.y2
     const x1 = Math.min(drag.x1, drag.x2)
     const x2 = Math.max(drag.x1, drag.x2)
     const y1 = Math.min(drag.y1, drag.y2)
@@ -60,8 +85,15 @@ export default function LabelCanvas({ imageUrl, boxes, classId, classes, onChang
     const w = x2 - x1
     const h = y2 - y1
     setDrag(null)
-    // Reject sub-0.5% boxes — almost certainly a misclick.
-    if (w < 0.005 || h < 0.005) return
+    // Sub-0.5% "box" = a click, not a drag: delete the box under the
+    // pointer (if any) instead of creating a degenerate box.
+    if (w < 0.005 || h < 0.005) {
+      if (onDelete) {
+        const hit = boxAtPoint(boxes, relX, relY)
+        if (hit >= 0) onDelete(hit)
+      }
+      return
+    }
     onChange([
       ...boxes,
       { class_id: classId, cx: x1 + w / 2, cy: y1 + h / 2, w, h },

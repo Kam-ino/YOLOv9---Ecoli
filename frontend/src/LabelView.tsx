@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   SPLITS,
@@ -46,6 +46,9 @@ export default function LabelView() {
   // ---- working set of boxes for the current image -------------------------
   const [boxes, setBoxes] = useState<LabelBox[]>([])
   const [split, setSplit] = useState<Split>('train')
+  // Sidebar/canvas class filter: null = show all boxes, else isolate a
+  // single class id.
+  const [classFilter, setClassFilter] = useState<number | null>(null)
 
   // ---- IO state -----------------------------------------------------------
   const [busy, setBusy] = useState(false)
@@ -113,6 +116,7 @@ export default function LabelView() {
       setImageUrl(URL.createObjectURL(blob))
       setImageName(name)
       setBoxes([])
+      setClassFilter(null)
       setMessage(null)
       setError(null)
     },
@@ -179,11 +183,51 @@ export default function LabelView() {
     return () => window.removeEventListener('keydown', onKey)
   }, [sourceMode, imageUrl, liveReady, onCaptureFromLive])
 
-  const onClearBoxes = useCallback(() => setBoxes([]), [])
-
   const onDeleteBox = useCallback((idx: number) => {
     setBoxes((prev) => prev.filter((_, i) => i !== idx))
   }, [])
+
+  // ---- class filter (isolate boxes by class) ------------------------------
+  // Box count per class on the current image.
+  const classCounts = useMemo(() => {
+    const m = new Map<number, number>()
+    for (const b of boxes) m.set(b.class_id, (m.get(b.class_id) ?? 0) + 1)
+    return m
+  }, [boxes])
+  // Distinct class ids present, for the filter tabs.
+  const presentClasses = useMemo(
+    () => [...classCounts.keys()].sort((a, b) => a - b),
+    [classCounts],
+  )
+  // Auto-fall back to "All" if the filtered class no longer has any boxes
+  // (e.g. you deleted the last one) — avoids a dead, empty view.
+  const activeFilter =
+    classFilter !== null && classCounts.has(classFilter) ? classFilter : null
+  // Boxes shown in the list/canvas, carrying their original index so
+  // deletes hit the right entry in the full array.
+  const visible = useMemo(
+    () => boxes
+      .map((b, idx) => ({ b, idx }))
+      .filter(({ b }) => activeFilter === null || b.class_id === activeFilter),
+    [boxes, activeFilter],
+  )
+  const visibleBoxes = useMemo(() => visible.map((v) => v.b), [visible])
+
+  // LabelCanvas only ever appends (it draws new boxes; deletes go through
+  // the list). So any boxes beyond the filtered set it was given are new
+  // — append them to the FULL list rather than replacing it, which keeps
+  // the hidden (other-class) boxes intact while a filter is active.
+  const onCanvasChange = useCallback((updated: LabelBox[]) => {
+    const added = updated.slice(visibleBoxes.length)
+    if (added.length) setBoxes((prev) => [...prev, ...added])
+  }, [visibleBoxes.length])
+
+  // "Clear all" clears everything; when a class is isolated it clears
+  // just that class.
+  const onClearBoxes = useCallback(() => {
+    if (activeFilter === null) setBoxes([])
+    else setBoxes((prev) => prev.filter((b) => b.class_id !== activeFilter))
+  }, [activeFilter])
 
   const onSave = useCallback(async () => {
     if (!imageBlob) return
@@ -345,10 +389,14 @@ export default function LabelView() {
           {imageUrl ? (
             <LabelCanvas
               imageUrl={imageUrl}
-              boxes={boxes}
+              boxes={visibleBoxes}
               classId={classId}
               classes={classes}
-              onChange={setBoxes}
+              onChange={onCanvasChange}
+              onDelete={(visIdx) => {
+                const orig = visible[visIdx]
+                if (orig) onDeleteBox(orig.idx)
+              }}
             />
           ) : sourceMode === 'snapshot' && snapshotSource.trim() ? (
             <div className="live-preview">
@@ -385,7 +433,7 @@ export default function LabelView() {
           ) : (
             <div className="placeholder">
               <p>Pick an image to start labelling — upload one, or capture a frame from your microscope.</p>
-              <p className="muted small">Click and drag on the image to draw a bounding box. Existing boxes are listed on the right and can be removed individually.</p>
+              <p className="muted small">Click and drag on the image to draw a bounding box. Click an existing box to remove it (or use the × in the list on the right).</p>
             </div>
           )}
         </div>
@@ -394,28 +442,55 @@ export default function LabelView() {
           {imageBlob ? (
             <>
               <div className="det-summary">
-                <div><strong>{boxes.length}</strong><span className="muted"> box{boxes.length === 1 ? '' : 'es'} on this image</span></div>
+                <div>
+                  <strong>{boxes.length}</strong>
+                  <span className="muted"> box{boxes.length === 1 ? '' : 'es'} on this image</span>
+                  {activeFilter !== null && (
+                    <span className="muted"> · showing {visible.length} {classes[activeFilter] ?? `cls_${activeFilter}`}</span>
+                  )}
+                </div>
                 <div className="muted">Class: {classes[classId] ?? `cls_${classId}`}</div>
                 <div className="muted">Split: {split}</div>
                 {boxes.length > 0 && (
                   <button
                     onClick={onClearBoxes}
                     style={{ marginTop: 8, padding: '4px 10px', fontSize: '0.8rem' }}
-                  >Clear all</button>
+                  >
+                    {activeFilter === null
+                      ? 'Clear all'
+                      : `Clear ${classes[activeFilter] ?? `cls_${activeFilter}`} (${classCounts.get(activeFilter) ?? 0})`}
+                  </button>
                 )}
               </div>
-              {boxes.length === 0 ? (
-                <p className="muted small">Draw a box by clicking and dragging.</p>
+              {boxes.length > 0 && (
+                <div className="seg" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
+                  <button
+                    className={activeFilter === null ? 'active' : ''}
+                    onClick={() => setClassFilter(null)}
+                  >All ({boxes.length})</button>
+                  {presentClasses.map((cid) => (
+                    <button
+                      key={cid}
+                      className={activeFilter === cid ? 'active' : ''}
+                      onClick={() => setClassFilter(cid)}
+                    >
+                      {classes[cid] ?? `cls_${cid}`} ({classCounts.get(cid)})
+                    </button>
+                  ))}
+                </div>
+              )}
+              {visible.length === 0 ? (
+                <p className="muted small">Drag to add a box; click a box to remove it.</p>
               ) : (
                 <ul>
-                  {boxes.map((b, i) => (
-                    <li key={i}>
+                  {visible.map(({ b, idx }) => (
+                    <li key={idx}>
                       <span className="cls-dot" style={{ background: colorForClass(b.class_id) }} />
                       <span className="cls-name">
-                        #{i + 1} {classes[b.class_id] ?? `cls_${b.class_id}`}
+                        #{idx + 1} {classes[b.class_id] ?? `cls_${b.class_id}`}
                       </span>
                       <button
-                        onClick={() => onDeleteBox(i)}
+                        onClick={() => onDeleteBox(idx)}
                         style={{ background: 'transparent', color: 'var(--fg-muted)', padding: '2px 8px', fontSize: '0.8rem' }}
                         title="Remove this box"
                       >×</button>

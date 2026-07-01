@@ -223,6 +223,7 @@ export default function LiveView() {
                 classId={classId}
                 classes={classes}
                 onChange={setEditBoxes}
+                onDelete={deleteBox}
               />
             )}
           </div>
@@ -238,7 +239,7 @@ export default function LiveView() {
                 Pre-filled with detections ≥ {minConf.toFixed(2)} confidence.
               </div>
               <div className="muted small">
-                Drag on the image to add a box (in the selected class). Delete below.
+                Drag to add a box (in the selected class); click a box to remove it.
               </div>
               {editBoxes.length > 0 && (
                 <button
