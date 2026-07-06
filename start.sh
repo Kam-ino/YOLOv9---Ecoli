@@ -88,30 +88,39 @@ if [[ ! -f "backend/app/static/index.html" ]]; then
     ok "Frontend built into backend/app/static/"
 fi
 
-# --- 4. Make sure SOME model is available --------------------------------
+# --- 4. Make sure a usable model is available ----------------------------
 
-# If you transferred a trained models/ecoli_yolov9c.pt this is a no-op.
-# If you didn't, fall back to the smoke config + auto-download yolov9c.pt
-# so the app can at least start.
-if [[ ! -f "models/ecoli_yolov9c.pt" ]] && [[ ! -f "models/yolov9c.pt" ]]; then
-    log "No model in models/ — downloading pretrained yolov9c.pt..."
+# The "real" model is whatever config.yaml's model.weights points to
+# (e.g. models/best_yolov9c.pt, which ships in the repo). If that file is
+# present we run it as-is — no download. Otherwise we fall back to the
+# COCO smoke model so the app can at least start, fetching yolov9c.pt only
+# then. Reading the path from config.yaml (rather than hard-coding a
+# filename) keeps this correct if you rename or repoint the weights.
+TRAINED_WEIGHTS="$("$PYTHON" -c "import yaml; d=yaml.safe_load(open('config.yaml', encoding='utf-8')) or {}; print((d.get('model') or {}).get('weights', ''))" 2>/dev/null)"
+
+CONFIG="${ECOLI_CONFIG:-}"
+if [[ -z "$CONFIG" ]]; then
+    if [[ -n "$TRAINED_WEIGHTS" && -f "$TRAINED_WEIGHTS" ]]; then
+        log "Using trained model from config.yaml: $TRAINED_WEIGHTS"
+        CONFIG="config.yaml"
+    else
+        log "No trained model at '${TRAINED_WEIGHTS:-<unset>}' — using config.smoke.yaml"
+        log "(detect tab will run the COCO model and won't find bacteria;"
+        log " add your trained weights and point config.yaml at them for the real model)"
+        CONFIG="config.smoke.yaml"
+    fi
+fi
+
+# Smoke config runs the COCO base yolov9c.pt — download it only if we'll
+# actually use smoke mode and it isn't already present.
+if [[ "$CONFIG" == "config.smoke.yaml" && ! -f "models/yolov9c.pt" ]]; then
+    log "Downloading pretrained yolov9c.pt for smoke mode..."
     "$PYTHON" -c "from ultralytics import YOLO; YOLO('yolov9c.pt')"
     # Ultralytics drops the file in cwd; move it where the config expects.
     [[ -f yolov9c.pt ]] && mv yolov9c.pt models/yolov9c.pt
     ok "yolov9c.pt → models/"
 fi
 
-CONFIG="${ECOLI_CONFIG:-}"
-if [[ -z "$CONFIG" ]]; then
-    if [[ -f "models/ecoli_yolov9c.pt" ]]; then
-        CONFIG="config.yaml"
-    else
-        log "No fine-tuned models/ecoli_yolov9c.pt — using config.smoke.yaml"
-        log "(detect tab will run the COCO model and won't find bacteria;"
-        log " scp your trained best.pt over and re-run for the real model)"
-        CONFIG="config.smoke.yaml"
-    fi
-fi
 export ECOLI_CONFIG="$CONFIG"
 
 # --- 5. Run --------------------------------------------------------------
