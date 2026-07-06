@@ -70,6 +70,8 @@ code {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px 16px;
+  flex-wrap: wrap;
   padding: 12px 24px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev);
@@ -95,6 +97,7 @@ code {
 .tabs {
   display: flex;
   gap: 4px;
+  flex-wrap: wrap;
   padding: 8px 24px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev);
@@ -140,17 +143,20 @@ code {
 .content {
   padding: 24px;
   flex: 1;
+  min-width: 0;
 }
 
 /* ---- Upload + live shared controls ---- */
 
-.upload-controls, .live-controls {
+.upload-controls, .live-controls, .label-controls {
   display: flex;
   gap: 12px;
   align-items: center;
   margin-bottom: 16px;
   flex-wrap: wrap;
 }
+/* Let flex children shrink instead of forcing horizontal overflow. */
+.upload-controls > *, .live-controls > *, .label-controls > * { min-width: 0; }
 
 .conf-filter {
   display: flex;
@@ -174,8 +180,15 @@ code {
   align-items: center;
   font-size: 0.85rem;
   color: var(--fg-muted);
+  min-width: 0;
 }
-.live-controls input[type="text"] { width: 320px; }
+/* Source field grows to fill, shrinks on narrow screens, never overflows. */
+.live-controls input[type="text"] {
+  flex: 1 1 220px;
+  min-width: 0;
+  width: auto;
+  max-width: 100%;
+}
 
 .error { color: var(--error); font-size: 0.85rem; }
 
@@ -186,8 +199,13 @@ code {
   grid-template-columns: 1fr 280px;
   gap: 16px;
 }
+/* Grid items default to min-width:auto, which lets wide content push the
+   layout past the viewport. Zero it so the image column shrinks instead. */
+.result-pane > * { min-width: 0; }
 @media (max-width: 800px) {
   .result-pane { grid-template-columns: 1fr; }
+  /* When stacked, don't cap the list height — let the page scroll. */
+  .det-list { max-height: none; }
 }
 
 .image-pane {
@@ -542,4 +560,33 @@ code {
 .danger-button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ---- Responsive: tablets and phones ---- */
+
+/* Tighter chrome + tamer control widths on small screens. */
+@media (max-width: 640px) {
+  .content { padding: 14px; }
+  .topbar, .tabs { padding-left: 14px; padding-right: 14px; }
+
+  /* Sliders get more of the row so they're usable with a thumb. */
+  .conf-filter { flex-wrap: wrap; }
+  .conf-filter input[type="range"] { width: 100%; flex: 1 1 140px; }
+
+  /* Give the Source field its own full-width row. */
+  .live-controls label:first-child { flex: 1 1 100%; }
+
+  /* Two-up training form collapses to one column. */
+  .train-form { grid-template-columns: 1fr; }
+
+  /* Full-bleed training console on phones. */
+  .modal-overlay { padding: 0; }
+  .modal-window { height: 100%; max-width: 100%; border-radius: 0; border: none; }
+}
+
+/* Very narrow: let controls stack fully and images use the height budget. */
+@media (max-width: 400px) {
+  body { font-size: 13px; }
+  .content { padding: 10px; }
+  button { padding: 7px 12px; }
 }
