@@ -1,4 +1,4 @@
-path: ../data/ecoli
+path: data/ecoli
 train: images/train
 val: images/val
 test: images/test

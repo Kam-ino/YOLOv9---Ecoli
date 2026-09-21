@@ -16,6 +16,8 @@ import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+import cv2
+import numpy as np
 import yaml
 
 from .schemas import (
@@ -121,6 +123,12 @@ class DatasetStore:
                 f"Invalid filename: {filename!r} "
                 f"(allowed: A-Z a-z 0-9 . _ - and space)"
             )
+        # Same name AND same pixels = the user re-opened an image to label
+        # more of it. Add the boxes to that entry; cloning it would leave two
+        # copies whose labels each call the other's objects background.
+        existing_split = self._split_holding_same_image(filename, image_bytes)
+        if existing_split is not None:
+            return self._append_boxes(filename, existing_split, boxes)
         final_name = self.unique_filename(filename)
         if final_name != filename:
             log.info(
@@ -151,6 +159,46 @@ class DatasetStore:
             split=split,
             image_url=f"/api/dataset/image/{split}/{final_name}",
             num_boxes=len(boxes),
+            created_at=image_path.stat().st_mtime,
+        )
+
+    def _split_holding_same_image(self, filename: str, image_bytes: bytes) -> Optional[str]:
+        """Split of an existing entry with this name and identical pixels, if any."""
+        new = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+        if new is None:
+            return None
+        for s in VALID_SPLITS:
+            path = self.root / "images" / s / filename
+            if not path.exists():
+                continue
+            old = cv2.imdecode(np.fromfile(str(path), np.uint8), cv2.IMREAD_COLOR)
+            if old is not None and old.shape == new.shape and np.array_equal(old, new):
+                return s
+        return None
+
+    def _append_boxes(self, filename: str, split: str, boxes: List[LabelBox]) -> DatasetEntry:
+        # The entry keeps its original split: moving it could leak train into val.
+        # ponytail: append-only, so boxes deleted in an edit session don't persist
+        # and a cell re-drawn by hand is kept twice. scripts/merge_duplicate_labels.py
+        # removes re-drawn boxes; add replace-on-save once the Label UI loads
+        # existing boxes via /api/dataset/find.
+        image_path, label_path = self._resolve(filename, split)
+        have = label_path.read_text(encoding="utf-8").splitlines() if label_path.exists() else []
+        seen = set(have)
+        added = [
+            line for line in
+            (f"{b.class_id} {b.cx:.6f} {b.cy:.6f} {b.w:.6f} {b.h:.6f}" for b in boxes)
+            if line not in seen
+        ]
+        lines = [ln for ln in have if ln.strip()] + added
+        label_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        log.info("Re-save of %s (split=%s): added %d box(es), now %d.",
+                 filename, split, len(added), len(lines))
+        return DatasetEntry(
+            filename=filename,
+            split=split,
+            image_url=f"/api/dataset/image/{split}/{filename}",
+            num_boxes=len(lines),
             created_at=image_path.stat().st_mtime,
         )
 

@@ -18,7 +18,7 @@ const POLL_IDLE_MS = 10_000
 export default function TrainPanel() {
   const [status, setStatus] = useState<TrainingStatus | null>(null)
   const [weights, setWeights] = useState('yolov9c.pt')
-  const [epochs, setEpochs] = useState(100)
+  const [epochs, setEpochs] = useState(250)
   const [batch, setBatch] = useState(16)
   const [imgsz, setImgsz] = useState(640)
   const [device, setDevice] = useState('auto')
