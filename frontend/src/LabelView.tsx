@@ -5,9 +5,13 @@ import {
   addLabelClass,
   colorForClass,
   deleteDatasetEntry,
+  detectionsToLabelBoxes,
+  fetchDatasetImage,
   fetchDatasetList,
   fetchDatasetStats,
   fetchLabelClasses,
+  findDatasetEntry,
+  predict,
   saveDatasetEntry,
   streamUrl,
   type DatasetEntry,
@@ -20,6 +24,16 @@ import LabelCanvas from './LabelCanvas'
 import TrainPanel from './TrainPanel'
 
 type SourceMode = 'upload' | 'snapshot'
+
+// IoU of two normalized YOLO boxes — used to skip model suggestions that
+// land on something already boxed.
+function iou(a: LabelBox, b: LabelBox): number {
+  const ix = Math.min(a.cx + a.w / 2, b.cx + b.w / 2) - Math.max(a.cx - a.w / 2, b.cx - b.w / 2)
+  const iy = Math.min(a.cy + a.h / 2, b.cy + b.h / 2) - Math.max(a.cy - a.h / 2, b.cy - b.h / 2)
+  if (ix <= 0 || iy <= 0) return 0
+  const inter = ix * iy
+  return inter / (a.w * a.h + b.w * b.h - inter)
+}
 
 export default function LabelView() {
   // ---- vocabulary / dataset summary state ---------------------------------
@@ -49,6 +63,14 @@ export default function LabelView() {
   // Sidebar/canvas class filter: null = show all boxes, else isolate a
   // single class id.
   const [classFilter, setClassFilter] = useState<number | null>(null)
+  // True once the canvas holds the complete box list of a saved entry
+  // (opened via Edit, or already saved once) — Save then overwrites that
+  // entry's labels instead of adding to them, so deletions persist.
+  const [editingExisting, setEditingExisting] = useState(false)
+  // Model suggestions not yet reviewed; drawn dashed. Keyed by object
+  // identity, which survives the filter/list mapping below.
+  const [suggested, setSuggested] = useState<Set<LabelBox>>(new Set())
+  const [suggestConf, setSuggestConf] = useState(0.25)
 
   // ---- IO state -----------------------------------------------------------
   const [busy, setBusy] = useState(false)
@@ -91,6 +113,8 @@ export default function LabelView() {
     setImageUrl(URL.createObjectURL(seed.imageBlob))
     setImageName(seed.imageName)
     setBoxes(seed.boxes)
+    setEditingExisting(false)
+    setSuggested(new Set())
     setError(null)
     setMessage(
       `Loaded ${seed.boxes.length} box${seed.boxes.length === 1 ? '' : 'es'} ` +
@@ -116,6 +140,8 @@ export default function LabelView() {
       setImageUrl(URL.createObjectURL(blob))
       setImageName(name)
       setBoxes([])
+      setEditingExisting(false)
+      setSuggested(new Set())
       setClassFilter(null)
       setMessage(null)
       setError(null)
@@ -233,15 +259,30 @@ export default function LabelView() {
     if (!imageBlob) return
     setBusy(true); setError(null); setMessage(null)
     try {
-      const entry = await saveDatasetEntry(imageBlob, boxes, split, imageName ?? undefined)
+      const entry = await saveDatasetEntry(
+        imageBlob, boxes, split, imageName ?? undefined, editingExisting,
+      )
       // Keep the canvas loaded so the user can keep refining and re-save.
-      // We deliberately do NOT adopt the backend-assigned filename: the
-      // backend auto-renames on collision (foo.png → foo - 1.png → …),
-      // so every Save click creates a new entry rather than overwriting.
+      // Adopt the stored name + split: the canvas now holds that entry's
+      // full box list, so the next Save updates it in place (same name +
+      // same pixels) rather than spawning a "foo - 1.png" sibling.
+      setImageName(entry.filename)
+      setSplit(entry.split as Split)
+      setSuggested(new Set())
+      // A re-upload of an already-saved image gets merged into that entry,
+      // which then holds boxes this canvas never had. Pull the full list
+      // before switching to overwrite mode, or the next Save would drop them.
+      const merged = entry.num_boxes !== boxes.length
+      if (merged) {
+        const found = await findDatasetEntry(entry.filename)
+        if (found) setBoxes(found.boxes)
+      }
+      setEditingExisting(true)
       setMessage(
         `Saved ${entry.num_boxes} box${entry.num_boxes === 1 ? '' : 'es'} ` +
-        `→ ${entry.split}/${entry.filename}. Each Save creates a new ` +
-        `entry — click "New image" when you're done with this one.`,
+        `→ ${entry.split}/${entry.filename}` +
+        (merged ? ' (added to the boxes already saved for this image). ' : '. ') +
+        `Saving again updates this entry.`,
       )
       refreshDataset()
     } catch (e) {
@@ -249,11 +290,65 @@ export default function LabelView() {
     } finally {
       setBusy(false)
     }
-  }, [imageBlob, boxes, split, imageName, refreshDataset])
+  }, [imageBlob, boxes, split, imageName, editingExisting, refreshDataset])
+
+  // Re-open a saved entry with its boxes, to fix or complete its labels.
+  const onEditEntry = useCallback(async (entry: DatasetEntry) => {
+    setBusy(true); setError(null)
+    try {
+      const [blob, found] = await Promise.all([
+        fetchDatasetImage(entry), findDatasetEntry(entry.filename),
+      ])
+      setSource(blob, entry.filename)
+      setBoxes(found?.boxes ?? [])
+      setSplit(entry.split as Split)
+      setEditingExisting(true)
+      setMessage(
+        `Editing ${entry.split}/${entry.filename} — ${found?.boxes.length ?? 0} saved boxes. ` +
+        `"Suggest missing" adds what the model sees that isn't boxed yet.`,
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }, [setSource])
+
+  // Ask the model what it sees and add only the detections that don't
+  // overlap a box already on the canvas. They arrive dashed; click the
+  // wrong ones away, then Save.
+  const onSuggestMissing = useCallback(async () => {
+    if (!imageBlob) return
+    setBusy(true); setError(null); setMessage(null)
+    try {
+      // preprocess=false: these are the exact pixels that get stored and
+      // trained on (stream captures arrive already CLAHE-enhanced), so the
+      // model must see them as-is. Enhancing again cost ~20 points of recall.
+      const res = await predict(
+        new File([imageBlob], imageName ?? 'image.png'), { preprocess: false },
+      )
+      const candidates = detectionsToLabelBoxes(
+        res.detections.filter((d) => d.confidence >= suggestConf),
+        res.image_size[0], res.image_size[1],
+      )
+      const fresh = candidates.filter((c) => !boxes.some((b) => iou(b, c) >= 0.3))
+      setBoxes((prev) => [...prev, ...fresh])
+      setSuggested((prev) => new Set([...prev, ...fresh]))
+      setMessage(
+        `${fresh.length} suggestion${fresh.length === 1 ? '' : 's'} added (dashed); ` +
+        `${candidates.length - fresh.length} already boxed. Click a wrong one to remove it.`,
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }, [imageBlob, imageName, boxes, suggestConf])
 
   const onClearImage = useCallback(() => {
     if (imageUrl) URL.revokeObjectURL(imageUrl)
     setImageBlob(null); setImageUrl(null); setImageName(null); setBoxes([])
+    setEditingExisting(false); setSuggested(new Set())
     setMessage(null); setError(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
     // Force a fresh live-preview connection so we don't reuse a stale,
@@ -372,6 +467,20 @@ export default function LabelView() {
         </button>
 
         {imageBlob && (
+          <label className="conf-filter" title="Add model detections that aren't boxed yet, for you to review">
+            <span>Min conf: <strong>{suggestConf.toFixed(2)}</strong></span>
+            <input
+              type="range" min={0.05} max={0.9} step={0.05}
+              value={suggestConf}
+              onChange={(e) => setSuggestConf(parseFloat(e.target.value))}
+            />
+            <button type="button" onClick={onSuggestMissing} disabled={busy}>
+              Suggest missing
+            </button>
+          </label>
+        )}
+
+        {imageBlob && (
           <button
             onClick={onClearImage}
             disabled={busy}
@@ -390,6 +499,7 @@ export default function LabelView() {
             <LabelCanvas
               imageUrl={imageUrl}
               boxes={visibleBoxes}
+              dashed={visibleBoxes.map((b) => suggested.has(b))}
               classId={classId}
               classes={classes}
               onChange={onCanvasChange}
@@ -501,7 +611,7 @@ export default function LabelView() {
             </>
           ) : (
             <>
-              <DatasetSummary stats={stats} entries={entries} onDelete={onDeleteEntry} />
+              <DatasetSummary stats={stats} entries={entries} onDelete={onDeleteEntry} onEdit={onEditEntry} />
               <TrainPanel />
             </>
           )}
@@ -512,11 +622,12 @@ export default function LabelView() {
 }
 
 function DatasetSummary({
-  stats, entries, onDelete,
+  stats, entries, onDelete, onEdit,
 }: {
   stats: DatasetStats | null
   entries: DatasetEntry[]
   onDelete: (e: DatasetEntry) => void
+  onEdit: (e: DatasetEntry) => void
 }) {
   if (!stats) return <p className="muted">Loading dataset…</p>
   return (
@@ -549,13 +660,20 @@ function DatasetSummary({
       {entries.length === 0 ? (
         <p className="muted small">No saved entries yet.</p>
       ) : (
-        <ul>
-          {entries.slice(0, 15).map((e) => (
+        // Every entry, in its own scroller: the whole dataset has to be
+        // reachable for label review without pushing the Train panel away.
+        <ul style={{ maxHeight: 280, overflowY: 'auto' }}>
+          {entries.map((e) => (
             <li key={`${e.split}/${e.filename}`}>
               <span className="cls-name" title={e.filename} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {e.split}/{e.filename}
               </span>
               <span className="conf">{e.num_boxes}</span>
+              <button
+                onClick={() => onEdit(e)}
+                style={{ background: 'transparent', color: 'var(--fg-muted)', padding: '2px 8px', fontSize: '0.8rem' }}
+                title="Open this entry to fix or complete its boxes"
+              >Edit</button>
               <button
                 onClick={() => onDelete(e)}
                 style={{ background: 'transparent', color: 'var(--fg-muted)', padding: '2px 8px', fontSize: '0.8rem' }}

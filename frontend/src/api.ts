@@ -186,6 +186,9 @@ export async function saveDatasetEntry(
   boxes: LabelBox[],
   split: Split,
   filename?: string,
+  // true = `boxes` is the full edited list for an already-saved image, so
+  // the backend overwrites its labels (deleted boxes stay deleted).
+  replace = false,
 ): Promise<DatasetEntry> {
   const fd = new FormData()
   // Pass a usable filename so the backend can derive an extension.
@@ -193,6 +196,7 @@ export async function saveDatasetEntry(
   fd.append('boxes', JSON.stringify(boxes))
   fd.append('split', split)
   if (filename) fd.append('filename', filename)
+  if (replace) fd.append('replace', 'true')
   const r = await fetch(api('/api/dataset/save'), { method: 'POST', body: fd })
   if (!r.ok) {
     const text = await r.text().catch(() => '')
@@ -215,6 +219,13 @@ export async function findDatasetEntry(
   if (r.status === 404) return null
   if (!r.ok) throw new Error(`/api/dataset/find → ${r.status}`)
   return r.json()
+}
+
+// The stored image bytes of a dataset entry, for re-opening it in the Label UI.
+export async function fetchDatasetImage(entry: DatasetEntry): Promise<Blob> {
+  const r = await fetch(api(entry.image_url))
+  if (!r.ok) throw new Error(`${entry.image_url} → ${r.status}`)
+  return r.blob()
 }
 
 export async function deleteDatasetEntry(split: Split, filename: string): Promise<void> {

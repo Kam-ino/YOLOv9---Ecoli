@@ -34,6 +34,11 @@ def test_resave_extends_entry() -> None:
         # Different pixels under the same name still get the collision suffix.
         assert other.filename == "img - 1.png"
 
+        # An edit session sends the full list: a removed box must stay removed.
+        edited = store.save(_png(1), [_box(.2)], "train", "img.png", replace=True)
+        assert (edited.filename, edited.num_boxes) == ("img.png", 1)
+        assert len(Path(d, "labels", "train", "img.txt").read_text().splitlines()) == 1
+
 
 if __name__ == "__main__":
     test_resave_extends_entry()

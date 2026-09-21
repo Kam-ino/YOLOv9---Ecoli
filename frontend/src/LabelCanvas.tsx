@@ -21,6 +21,9 @@ type Props = {
   // Called with the index (into `boxes`) of a box clicked on the image.
   // Omit to disable click-to-delete.
   onDelete?: (index: number) => void
+  // Parallel to `boxes`: true draws that box dashed (an unreviewed model
+  // suggestion) so it stands apart from hand-drawn / saved boxes.
+  dashed?: boolean[]
 }
 
 // Index of the box under normalized point (x, y), or -1. When boxes
@@ -42,7 +45,7 @@ function boxAtPoint(boxes: LabelBox[], x: number, y: number): number {
   return best
 }
 
-export default function LabelCanvas({ imageUrl, boxes, classId, classes, onChange, onDelete }: Props) {
+export default function LabelCanvas({ imageUrl, boxes, classId, classes, onChange, onDelete, dashed }: Props) {
   const imgRef = useRef<HTMLImageElement>(null)
   const [natural, setNatural] = useState<[number, number] | null>(null)
   const [drag, setDrag] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null)
@@ -136,6 +139,7 @@ export default function LabelCanvas({ imageUrl, boxes, classId, classes, onChang
                   x={x} y={y} width={w} height={h}
                   fill="rgba(255,255,255,0.04)"
                   stroke={color} strokeWidth={strokeW}
+                  strokeDasharray={dashed?.[i] ? `${longer / 100},${longer / 200}` : undefined}
                 />
                 <text
                   x={x} y={Math.max(y - strokeW * 2, fontSize)}

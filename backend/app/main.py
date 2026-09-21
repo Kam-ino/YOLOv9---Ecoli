@@ -274,7 +274,9 @@ def create_app() -> FastAPI:
         h, w = frame.shape[:2]
         with service.lock:
             t0 = time.perf_counter()
-            dets = service.detector.predict(frame)
+            # Still image: latency matters less than finding small cells on
+            # a large slide, so allow native-resolution tiling.
+            dets = service.detector.predict(frame, tiled=True)
             inference_ms = (time.perf_counter() - t0) * 1000.0
 
         return PredictResponse(
@@ -418,6 +420,11 @@ def create_app() -> FastAPI:
         boxes: str = Form("[]", description="JSON list of LabelBox dicts."),
         split: str = Form("train"),
         filename: Optional[str] = Form(None),
+        replace: bool = Form(
+            False,
+            description="boxes is the full edited list for an already-saved "
+                        "image: overwrite its labels instead of adding to them.",
+        ),
     ) -> DatasetEntry:
         if split not in VALID_SPLITS:
             raise HTTPException(
@@ -460,7 +467,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         try:
-            return get_store().save(image_bytes, box_objs, split, filename)
+            return get_store().save(image_bytes, box_objs, split, filename, replace=replace)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
