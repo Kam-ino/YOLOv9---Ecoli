@@ -46,7 +46,10 @@ export default function UploadView() {
     setLoading(true)
     setError(null)
     try {
-      setResult(await predict(file))
+      // preprocess=false: uploaded files are stored and trained on as-is
+      // (only stream frames are CLAHE-enhanced, and those arrive enhanced).
+      // Enhancing uploads at inference only lowered recall on held-out slides.
+      setResult(await predict(file, { preprocess: false }))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
