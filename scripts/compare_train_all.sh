@@ -23,13 +23,15 @@ mkdir -p "$OUT"
 rm -f "$OUT"/DONE_* "$OUT"/FAILED_*
 echo "[$(date '+%F %T')] start" >> "$LOG"
 
-if $PY scripts/compare_train.py --algo yolov9 --expand8 --folds 0 1 2 3 4 >> "$LOG" 2>&1; then
+# --patience 0: no early stopping (a 6-image inner val made patience 3-4 stop
+# YOLO at epoch 6 in one fold); best checkpoint is still picked on inner val.
+if $PY scripts/compare_train.py --algo yolov9 --expand8 --patience 0 --name-suffix _full --folds 0 1 2 3 4 >> "$LOG" 2>&1; then
   touch "$OUT/DONE_yolov9"; echo "[$(date '+%F %T')] yolov9 done" >> "$LOG"
 else
   touch "$OUT/FAILED_yolov9"; echo "[$(date '+%F %T')] yolov9 FAILED" >> "$LOG"
 fi
 
-if $PY scripts/compare_train.py --algo rfdetr --expand8 --batch 1 --gradient-checkpointing --folds 0 1 2 3 4 >> "$LOG" 2>&1; then
+if $PY scripts/compare_train.py --algo rfdetr --expand8 --batch 1 --gradient-checkpointing --patience 0 --name-suffix _full --folds 0 1 2 3 4 >> "$LOG" 2>&1; then
   touch "$OUT/DONE_rfdetr"; echo "[$(date '+%F %T')] rfdetr done" >> "$LOG"
 else
   touch "$OUT/FAILED_rfdetr"; echo "[$(date '+%F %T')] rfdetr FAILED" >> "$LOG"

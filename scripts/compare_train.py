@@ -44,6 +44,8 @@ def main() -> None:
     ap.add_argument("--smoke", action="store_true", help="2 epochs into fold<k>_smoke.")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--epochs", type=int, default=None)
+    ap.add_argument("--patience", type=int, default=None, help="Override the (scaled) recipe patience; 0 = off.")
+    ap.add_argument("--name-suffix", default="", help="Extra run-name suffix for variants, e.g. _full.")
     ap.add_argument("--batch", type=int, default=None)
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--device", default="0")
@@ -62,11 +64,11 @@ def main() -> None:
     r = RECIPE[a.algo]
     scale = 8 if a.expand8 else 1
     epochs = a.epochs or (2 if a.smoke else max(1, round(r["epochs"] / scale)))
-    patience = max(3, round(r["patience"] / scale))
+    patience = a.patience if a.patience is not None else max(3, round(r["patience"] / scale))
     batch = a.batch or r["batch"]
     env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
     for k in a.folds:
-        name = f"fold{k}" + ("_x8" if a.expand8 else "") + ("_smoke" if a.smoke else "")
+        name = f"fold{k}" + ("_x8" if a.expand8 else "") + a.name_suffix + ("_smoke" if a.smoke else "")
         out = OUT_DIR / a.algo / name
         best = out / BEST[a.algo]
         if best.exists() and not a.force:

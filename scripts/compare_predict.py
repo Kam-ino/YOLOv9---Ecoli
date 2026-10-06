@@ -141,7 +141,7 @@ def main() -> None:
 
     assert {r["image_id"] for r in test_results} <= set(by_id)
     (OUT_DIR / f"preds_{tag}.json").write_text(json.dumps(test_results), encoding="utf-8")
-    (OUT_DIR / f"preds_{tag}.meta.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
+    (OUT_DIR / f"preds_{tag}.meta.json").write_text(json.dumps(meta, indent=1, default=str), encoding="utf-8")
     covered = len({r["image_id"] for r in test_results})
     print(f"wrote preds_{tag}.json: {len(test_results)} detections on {covered}/{len(by_id)} images "
           f"(images with zero detections are legitimately absent)")

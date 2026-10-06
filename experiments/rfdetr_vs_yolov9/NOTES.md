@@ -221,3 +221,14 @@ accumulator == pycocotools, bootstrap Δ = 0), fold assertions in
   RF-DETR ×8 at batch 2 + gradient checkpointing: 4.5 min/epoch, 5.6 GB
   Lightning `max_mem`, GPU full (app backend holding 2 GB) → batch-1 timing
   test pending. `--expand8` and `make_pseudo_dataset.py` added.
+- 2026-10-07 02:08–04:15: first full run on the pseudo-labelled ×8 folds
+  (YOLO 29 ep / patience 4, RF-DETR 25 ep / patience 3, batch 1 + grad
+  checkpointing after batch 2 spilled VRAM). YOLO finished all folds in
+  2.7–9.2 min each; fold 1 "best" epoch was 2 and training stopped at
+  epoch 6 (inside Ultralytics' 3-epoch warm-up) → fold mAP50 0.17 vs 0.34–0.48
+  elsewhere. Verdict: patience 3–4 on a 6-image inner val is noise-driven.
+  **Protocol change**: no early stopping; full scaled budget (YOLO 29 ep,
+  RF-DETR 25 ep) with best-checkpoint selection on inner val for both. The
+  early-stopped YOLO predictions are kept as `yolov9_es` (sensitivity row);
+  RF-DETR's early-stopped folds 0–1 (`fold0_x8`, `fold1_x8`) are incomplete
+  and unused. Full-budget runs: `fold<k>_x8_full`, started 04:20.
