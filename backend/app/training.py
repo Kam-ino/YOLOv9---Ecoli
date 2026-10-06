@@ -103,6 +103,7 @@ class TrainingService:
         device: str,
         name: Optional[str] = None,
         algorithm: str = "yolov9",
+        expand8: bool = False,
     ) -> dict:
         """Spawn a training run. Raises RuntimeError if one is in progress."""
         if algorithm not in _TRAIN_MODULE:
@@ -123,6 +124,8 @@ class TrainingService:
                 "--imgsz", str(imgsz),
                 "--name", name,
             ]
+            if expand8:
+                cmd.append("--expand8")
             resolved_device = _resolve_train_device(device)
             if resolved_device is not None:
                 cmd += ["--device", resolved_device]

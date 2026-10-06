@@ -302,6 +302,7 @@ export type TrainStartRequest = {
   imgsz?: number
   device?: string
   name?: string
+  expand8?: boolean   // train on the 8 rotations/mirrors of each training image
 }
 
 export async function fetchTrainingStatus(): Promise<TrainingStatus> {

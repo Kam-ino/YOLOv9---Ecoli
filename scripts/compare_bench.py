@@ -85,6 +85,7 @@ def bench(det, frames, passes: int, warmup: int) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--fold", type=int, default=0)
+    ap.add_argument("--suffix", default="", help="Run-name suffix, e.g. _x8.")
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--max-det", type=int, default=1200)
     ap.add_argument("--variant", default="medium")
@@ -112,7 +113,7 @@ def main() -> None:
            "models": {}}
     rows = []
     for algo in ("yolov9", "rfdetr"):
-        weights = OUT_DIR / algo / f"fold{a.fold}" / BEST[algo]
+        weights = OUT_DIR / algo / f"fold{a.fold}{a.suffix}" / BEST[algo]
         if not weights.is_file():
             print(f"skip {algo}: no weights at {weights}")
             continue

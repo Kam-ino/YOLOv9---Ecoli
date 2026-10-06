@@ -48,14 +48,23 @@ def main() -> None:
         out = OUT_DIR / "sanity" / split
         out.mkdir(parents=True, exist_ok=True)
         for name in rng.sample(files, min(a.n, len(files))):
-            im = next(i for i in gt["images"] if i["file_name"] == name)
             img = cv2.imread(str(folder / name))
-            assert img.shape[1] == im["width"] and img.shape[0] == im["height"], (name, img.shape, im)
-            for x in anns.get(im["id"], []):
-                bx, by, bw, bh = x["bbox"]
-                cv2.rectangle(img, (int(bx), int(by)), (int(bx + bw), int(by + bh)), COLORS.get(x["category_id"], (255, 0, 255)), 1)
-            label = f"{split} fold{a.fold} id={im['id']} {len(anns.get(im['id'], []))} boxes " \
-                    f"{' '.join(f'{names[k]}={c}' for k, c in COLORS.items() if k in names)} dom={meta[name]['domain']}"
+            im = next((i for i in gt["images"] if i["file_name"] == name), None)
+            if im is not None:                      # original image: boxes from the COCO json
+                assert img.shape[1] == im["width"] and img.shape[0] == im["height"], (name, img.shape, im)
+                boxes = [(x["bbox"], x["category_id"]) for x in anns.get(im["id"], [])]
+                tag = f"id={im['id']} dom={meta[name]['domain']}"
+            else:                                   # expanded/pseudo-labelled variant: boxes from its txt
+                h, w = img.shape[:2]
+                boxes = []
+                for ln in (folder.parent / "labels" / (Path(name).stem + ".txt")).read_text(encoding="utf-8").splitlines():
+                    c, cx, cy, bw, bh = (float(v) for v in ln.split())
+                    boxes.append(([(cx - bw / 2) * w, (cy - bh / 2) * h, bw * w, bh * h], int(c)))
+                tag = "expanded (human + pseudo labels)"
+            for (bx, by, bw, bh), cid in boxes:
+                cv2.rectangle(img, (int(bx), int(by)), (int(bx + bw), int(by + bh)), COLORS.get(cid, (255, 0, 255)), 1)
+            label = f"{split} fold{a.fold} {tag} {len(boxes)} boxes " \
+                    f"{' '.join(f'{names[k]}={c}' for k, c in COLORS.items() if k in names)}"
             cv2.putText(img, label, (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
             cv2.putText(img, label, (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
             cv2.imwrite(str(out / name), img)

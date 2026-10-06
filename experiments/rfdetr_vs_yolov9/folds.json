@@ -3,8 +3,9 @@
  "folds": 5,
  "inner_val": 6,
  "dup_threshold": 4.0,
+ "train_from": "C:/Users/U S E R - P C/Desktop/Claude-Obsidian/Claude1/GitHub/YOLOv9 - Ecoli/data/ecoli_x8",
  "n_images": 69,
- "n_boxes": 5585,
+ "n_boxes": 5937,
  "categories": {
   "0": "ecoli",
   "1": "ecoli_cluster"
@@ -928,8 +929,8 @@
     0,
     2
    ],
-   "n_boxes": 343,
-   "label_sha256": "1c4bf81958a9e1efb5e36f0baa6dea03247dddc1657318bdd1a8873fa7746471"
+   "n_boxes": 614,
+   "label_sha256": "cc8bcce0beda5611ca844e46cba925a881646d346ee4ae6d0cea8714e12bf288"
   },
   {
    "id": 66,
@@ -940,8 +941,8 @@
    "domain": "stained",
    "origin_split": "train",
    "inner_val_of": [],
-   "n_boxes": 198,
-   "label_sha256": "374644fae306fbe7c2a8e99dfa7022de5bcf8107a61d611406decdd95071f63b"
+   "n_boxes": 240,
+   "label_sha256": "69b9ea601acbe9c369373730acd9d22f1d869abc2892690c51f53101838fcf8e"
   },
   {
    "id": 67,
@@ -983,8 +984,8 @@
    "inner_val_of": [
     2
    ],
-   "n_boxes": 107,
-   "label_sha256": "b4625bbd209b3f23e4efc170e1f43d6af9544b402c1c1ad6c97dafe6f3b04493"
+   "n_boxes": 146,
+   "label_sha256": "c49accbf21b326de98ed7f2771c16c71645bb73a05f320225a1a4fc51cd9b490"
   }
  ]
 }

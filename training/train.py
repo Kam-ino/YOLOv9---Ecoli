@@ -62,6 +62,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--workers", type=int, default=4,
                    help="DataLoader worker count. Reduce on Windows / "
                         "low-RAM machines.")
+    p.add_argument("--expand8", action="store_true",
+                   help="Train on all 8 rotations/mirrors of each training image "
+                        "(materialised under runs/views/<name>/; val is left as-is). "
+                        "Each epoch then sees 8x more images, so lower --epochs.")
     p.add_argument("--lr0", type=float, default=0.001,
                    help="Initial learning rate (AdamW).")
     p.add_argument("--optimizer", default="AdamW",
@@ -117,6 +121,15 @@ def main() -> None:
     # copy_paste=0.0  avoid — same reason
     # erasing=0.2     light random erasing helps occlusion robustness
     # ------------------------------------------------------------------
+
+    if args.expand8:
+        from training.dataset_view import make_view, names_of_yaml, splits_of_yaml
+        splits = splits_of_yaml(data_path)
+        view = Path("runs") / "views" / args.name
+        data_path = make_view({k: v for k, v in splits.items() if k in ("train", "valid")},
+                              view, names_of_yaml(data_path), expand8_train=True)
+        log.info("expand8: %d training images -> %d orientation variants in %s",
+                 len(splits.get("train", [])), 8 * len(splits.get("train", [])), view)
 
     results = model.train(
         data=str(data_path),

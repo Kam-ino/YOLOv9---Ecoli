@@ -133,6 +133,10 @@ def main() -> None:
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--inner-val", type=int, default=6)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--train-from", type=Path, default=None,
+                    help="Expanded dataset (scripts/make_pseudo_dataset.py output, images/<split>/<stem>__d4-k.png). "
+                         "Training splits then use all 8 variants + its labels; inner val and held-out images stay "
+                         "original with human labels.")
     a = ap.parse_args()
 
     names = names_of_yaml(a.names)
@@ -152,8 +156,27 @@ def main() -> None:
         plan.append({"test": held, "valid": inner, "train": train})
 
     # --- views ------------------------------------------------------------
+    def expanded_variants(p: Path):
+        """The 8 orientation files of ``p`` inside --train-from (same split folder)."""
+        folder = a.train_from / "images" / p.parent.name
+        vs = sorted(folder.glob(f"{p.stem}__d4-*{p.suffix}"))
+        assert len(vs) == 8, (p.name, len(vs), folder)
+        return vs
+
+    import shutil
     for k, sp in enumerate(plan):
-        make_view(sp, OUT_DIR / "folds" / f"fold{k}", names)
+        view = {"test": sp["test"], "valid": sp["valid"], "train": sp["train"]}
+        if a.train_from:
+            view["train"] = [v for p in sp["train"] for v in expanded_variants(p)]
+        view_dir = OUT_DIR / "folds" / f"fold{k}"
+        shutil.rmtree(view_dir, ignore_errors=True)       # views are links/derived files; rebuild clean
+        out_yaml = make_view(view, view_dir, names)
+        if a.train_from:
+            import yaml
+            d = yaml.safe_load(out_yaml.read_text(encoding="utf-8"))
+            d["expanded"] = True
+            d["train_from"] = a.train_from.resolve().as_posix()
+            out_yaml.write_text(yaml.safe_dump(d, sort_keys=False), encoding="utf-8")
 
     # --- COCO ground truth over the pooled set ------------------------------
     fold_of = {p: k for k, f in enumerate(folds) for p in f}
@@ -203,6 +226,7 @@ def main() -> None:
         assert len(sp["test"]) + len(sp["valid"]) + len(sp["train"]) == len(images)
     out = {
         "seed": a.seed, "folds": a.folds, "inner_val": a.inner_val, "dup_threshold": DUP_THRESHOLD,
+        "train_from": a.train_from.resolve().as_posix() if a.train_from else None,
         "n_images": len(images), "n_boxes": len(coco_anns), "categories": names,
         "fold_sizes": [{"test": len(sp["test"]), "valid": len(sp["valid"]), "train": len(sp["train"])}
                        for sp in plan],

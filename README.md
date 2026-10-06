@@ -212,6 +212,16 @@ Both wrappers share the tiling logic for large slides (`_Detector` in
 block of `config.yaml` (`variant`, `resolution`, `num_queries` = max
 detections per image — dense slides exceed the library default of 300).
 
+Both trainers accept `--expand8` (Train tab: **Expand ×8**): before training,
+every training image is written in its 8 rotations/mirrors with transformed
+labels under the run's dataset view; validation images are left as they are.
+Each epoch then covers 8× more images, so divide the epoch count accordingly.
+
+RF-DETR's published checkpoints carry 300 object queries; dense slides here
+hold up to ~1,000 cells, so `train_rfdetr.py` derives a 1,200-query
+checkpoint (`models/rf-detr-<variant>-q1200.pth`, see
+`training/rfdetr_queries.py`) the first time it is needed.
+
 The two models are compared under one evaluation in
 `experiments/rfdetr_vs_yolov9/` (`scripts/compare_*.py`).
 

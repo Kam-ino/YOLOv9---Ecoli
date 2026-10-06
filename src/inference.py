@@ -375,19 +375,18 @@ class RFDETRDetector(_Detector):
         self.iou = float(iou_threshold)
         self.max_det = int(num_queries)
 
-        kwargs = dict(
-            resolution=self.imgsz,
-            num_queries=self.max_det,
-            num_select=self.max_det,
-            device=self.device,
-        )
+        kwargs = dict(resolution=self.imgsz, device=self.device)
         weights = Path(weights_path) if weights_path else None
         if weights is not None and weights.is_file():
-            kwargs["pretrain_weights"] = str(weights)
+            # A fine-tuned checkpoint carries exactly num_queries query slots
+            # (training/train_rfdetr.py expands the COCO base to that count).
+            kwargs.update(pretrain_weights=str(weights), num_queries=self.max_det, num_select=self.max_det)
             source = str(weights)
         else:
+            # The published COCO checkpoint has the library's default query
+            # count; asking for more would fail to load, so keep its default.
             source = f"COCO-pretrained rf-detr-{variant}"
-            log.info("No RF-DETR weights at %s — loading %s.", weights, source)
+            log.info("No RF-DETR weights at %s — loading %s (default query count).", weights, source)
 
         try:
             self.model = model_cls(**kwargs)

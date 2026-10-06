@@ -32,3 +32,6 @@ frontend/.vite/
 .idea/
 *.swp
 .DS_Store
+
+# Regenerable expanded + pseudo-labelled copy of data/ecoli (scripts/make_pseudo_dataset.py, ~250 MB)
+data/ecoli_x8/

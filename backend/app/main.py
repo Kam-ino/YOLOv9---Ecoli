@@ -603,6 +603,7 @@ def create_app() -> FastAPI:
                 device=req.device,
                 name=req.name,
                 algorithm=req.algorithm,
+                expand8=req.expand8,
             ))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

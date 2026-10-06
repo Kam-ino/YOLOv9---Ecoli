@@ -87,6 +87,56 @@ match" — `category_id` = YOLO class index). Sanity renders of the COCO GT:
 | per-image cap | `max_det 1200` (thesis val used 300) | `num_queries = num_select = 1200` |
 | selection | best.pt by inner-val fitness (mAP50-95) | `checkpoint_best_ema.pth` by inner-val mAP50-95 |
 
+### Query expansion (RF-DETR)
+
+The published COCO checkpoints carry 300 object queries packed as
+`nn.Embedding(300 × 13 groups)`; rfdetr can shrink that on load but not grow
+it, and the densest slide has 1,043 cells. `training/rfdetr_queries.py`
+derives `models/rf-detr-medium-q1200.pth` by tiling each group's 300 learned
+queries 4× (copies get Gaussian noise of 2 % of the tensor's std so they
+separate during fine-tuning) and updating the stored `num_queries`;
+`train_rfdetr.py` does this automatically when `--num-queries` exceeds the
+checkpoint. The 1,200 slots are therefore initialised from the 300 learned
+ones, not at random — note this in the paper as a method detail. Smoke runs
+(2 epochs, batch 2, 640 px, 1,200 queries, fold 0 and fold 2): ~1.5 min,
+Lightning `max_mem` 4.6 GB, total GPU peak 6.6–7.2 GB with ~1.2–1.6 GB held
+by the running app backend → full training uses `--gradient-checkpointing`.
+
+### Offline ×8 orientation expansion (`--expand8`)
+
+Requested 2026-10-07: every *training* image is written in its 8 dihedral
+variants (4 rotations × {original, mirrored}) with transformed labels
+(`training/dataset_view.py`, self-test checks each rotated label against the
+rotated pixels). Applied identically to both models, so both see all
+orientations and the augmentation confound shrinks; inner-val and held-out
+images are never expanded (evaluation stays on real frames, and expanding a
+held-out image would leak its twins into training). Epoch and patience
+budgets are divided by 8 so the optimiser-step budget is unchanged
+(`scripts/compare_train.py --expand8` → YOLO 29 ep / patience 4, RF-DETR
+25 ep / patience 3; outputs `fold<k>_x8`). YOLO's online rotation/flip
+augmentation stays on top, so for YOLO the expansion is largely redundant;
+for RF-DETR (hflip only) it is the new signal.
+
+### Pseudo-labelled expanded dataset (`data/ecoli_x8/`, requested 2026-10-07)
+
+`scripts/make_pseudo_dataset.py` writes all 69 images × 8 orientations (552)
+with the rotated human labels **plus** teacher detections (thesis
+`models/best_yolov9c.pt`, tiled, conf ≥ 0.25) that overlap no existing box
+(IoU < 0.3 — the app's "Suggest missing" rule). `pseudo.json` lists every
+added box with its confidence. Motivation: the val relabel (487 → 1,629
+boxes) showed the human labels are incomplete; the teacher fills gaps.
+`scripts/compare_folds.py --train-from data/ecoli_x8` builds fold views
+whose *training* split is the expanded, pseudo-labelled copy of the fold's
+training images; inner-val and held-out images stay original with human
+labels, and `runs/compare/gt_all.json` is unchanged.
+
+Confounds this adds: only YOLOv9 can act as teacher (COCO RF-DETR knows no
+bacteria), so both students inherit YOLO's detections and errors — a bias
+towards YOLOv9 that the paper must state. The teacher trained on
+train + val, so its pseudo-labels on a fold's training images are not
+independent of that fold's held-out images; evaluation is still against
+human labels only.
+
 ### Known confounds (state in the paper)
 
 - Augmentation: YOLO's mosaic / rotation / HSV / erasing vs RF-DETR's scale
@@ -144,9 +194,30 @@ accumulator == pycocotools, bootstrap Δ = 0), fold assertions in
 - Windows consoles default to cp1252: the compare scripts print ASCII only.
 - `rfdetr[train]` pins `numpy < 2.4` (downgraded 2.4.4 → 2.3.5 on install)
   and pulls `roboflow`, `peft`, `accelerate`, `pyarrow`, `av`.
+- The COCO checkpoint `rf-detr-medium.pth` (386 MB, md5
+  `7223f764a87b863f02eb8d52bf0ce2ee`, from
+  `https://storage.googleapis.com/rfdetr/medium_coco/checkpoint_best_regular.pth`)
+  is fetched by rfdetr into `~/.roboflow/models/` (override with `RF_HOME`)
+  without resume; on a slow link, download it with `curl -C -` to that path
+  instead — rfdetr accepts a pre-placed file whose md5 matches.
 
 ## Log
 
-- 2026-10-06: plan agreed; app integration (algorithm switch) built; folds,
-  GT, sanity renders done; YOLOv9 smoke train on fold 0 OK (2 epochs,
-  `max_det 1200` accepted); RF-DETR smoke pending `rfdetr` install.
+- 2026-10-06: plan agreed; app integration (algorithm switch) built, tested
+  in the browser and committed (`058069a`); comparison pipeline committed
+  (`e3cf08f`); folds, GT (1-based ids), sanity renders and
+  `compare_eval.py --selftest` done; YOLOv9 smoke train on fold 0 OK
+  (2 epochs, `max_det 1200` accepted, output landed under
+  `runs/detect/runs/compare/...` → absolute `--project` in compare_train.py).
+  RF-DETR smoke train waits on the 386 MB COCO checkpoint download
+  (`~/.roboflow/models/rf-detr-medium.pth`, ~100 kB/s link).
+- 2026-10-07: checkpoint fetched (md5 ok); `training/rfdetr_queries.py`
+  added (1,200-query checkpoint); RF-DETR runs through the API (COCO base).
+  **Bug found and fixed**: `dataset_view.label_of` only knew the
+  `images/<split>` layout, so views built from fold views (train_rfdetr.py,
+  `--expand8`) had empty labels — the first RF-DETR smokes trained on nothing
+  (zero losses, val mAP −1). After the fix, 2-epoch smokes on fold 2 with ×8
+  expansion: RF-DETR val mAP50 0.50 / mAP50-95 0.22, YOLOv9 mAP50 0.39.
+  RF-DETR ×8 at batch 2 + gradient checkpointing: 4.5 min/epoch, 5.6 GB
+  Lightning `max_mem`, GPU full (app backend holding 2 GB) → batch-1 timing
+  test pending. `--expand8` and `make_pseudo_dataset.py` added.

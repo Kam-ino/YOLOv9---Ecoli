@@ -425,6 +425,15 @@ code {
 .train-form input:disabled {
   opacity: 0.5;
 }
+.train-form .train-check {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.train-form input[type="checkbox"] {
+  width: auto;
+  accent-color: var(--accent);
+}
 .train-form select {
   background: var(--bg-elev-2);
   color: var(--fg);

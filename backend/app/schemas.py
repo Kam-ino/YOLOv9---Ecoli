@@ -99,6 +99,8 @@ class TrainStartRequest(BaseModel):
     imgsz: int = Field(640, ge=64, le=2048)
     device: str = "auto"          # "auto" | "cpu" | "0" | "0,1" | ...
     name: Optional[str] = None
+    # Train on the 8 rotations/mirrors of every training image (val untouched).
+    expand8: bool = False
 
 
 class TrainingStatusResponse(BaseModel):

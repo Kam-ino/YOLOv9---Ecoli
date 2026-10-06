@@ -42,6 +42,7 @@ export default function TrainPanel() {
   const [batch, setBatch] = useState(DEFAULTS[algorithm].batch)
   const [imgsz, setImgsz] = useState(640)
   const [device, setDevice] = useState('auto')
+  const [expand8, setExpand8] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -111,13 +112,13 @@ export default function TrainPanel() {
     userClosedRef.current = false
     setConsoleOpen(true)
     try {
-      setStatus(await startTraining({ algorithm, weights, epochs, batch, imgsz, device }))
+      setStatus(await startTraining({ algorithm, weights, epochs, batch, imgsz, device, expand8 }))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
     }
-  }, [algorithm, weights, epochs, batch, imgsz, device])
+  }, [algorithm, weights, epochs, batch, imgsz, device, expand8])
 
   const onStop = useCallback(async () => {
     setBusy(true); setError(null)
@@ -228,6 +229,18 @@ export default function TrainPanel() {
             type="text" value={device}
             onChange={(e) => setDevice(e.target.value)}
             placeholder="auto, 0, cpu"
+            disabled={running || busy}
+          />
+        </label>
+        <label
+          className="train-check"
+          title="Before training, write the 4 rotations x {original, mirrored} of every training image (val is left as-is). Each epoch then sees 8x more images, so divide Epochs by about 8."
+        >
+          <span>Expand ×8</span>
+          <input
+            type="checkbox"
+            checked={expand8}
+            onChange={(e) => setExpand8(e.target.checked)}
             disabled={running || busy}
           />
         </label>

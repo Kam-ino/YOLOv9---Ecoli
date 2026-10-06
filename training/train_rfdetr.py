@@ -37,6 +37,7 @@ import sys
 from pathlib import Path
 
 from training.dataset_view import make_view, names_of_yaml, splits_of_yaml
+from training.rfdetr_queries import expand_if_needed
 
 
 log = logging.getLogger(__name__)
@@ -83,6 +84,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--gradient-checkpointing", action="store_true",
                    help="~30-40%% less VRAM for ~20%% more time.")
+    p.add_argument("--expand8", action="store_true",
+                   help="Train on all 8 rotations/mirrors of each training image "
+                        "(val is left as-is). Each epoch then sees 8x more images.")
     return p.parse_args()
 
 
@@ -134,6 +138,13 @@ def main() -> None:
         variant = variant or "medium"
     model_cls = getattr(rfdetr, f"RFDETR{variant.capitalize()}")
 
+    # The published checkpoints carry 300 queries and rfdetr cannot grow that
+    # on load; derive a checkpoint with the requested count when needed.
+    expanded = expand_if_needed(str(pretrain) if pretrain else None, variant, args.num_queries)
+    if expanded is not None and (pretrain is None or Path(expanded) != pretrain):
+        log.info("Using query-expanded checkpoint %s (%d queries).", expanded, args.num_queries)
+    pretrain = Path(expanded) if expanded else pretrain
+
     run_dir = Path(args.project) / args.name
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -146,7 +157,11 @@ def main() -> None:
                   data_path, {k: len(v) for k, v in splits.items()})
         sys.exit(1)
     dataset_dir = run_dir / "dataset"
-    make_view({"train": splits["train"], "valid": splits["valid"]}, dataset_dir, names)
+    make_view({"train": splits["train"], "valid": splits["valid"]}, dataset_dir, names,
+              expand8_train=args.expand8)
+    if args.expand8:
+        log.info("expand8: %d training images -> %d orientation variants",
+                 len(splits["train"]), 8 * len(splits["train"]))
     class_names = [names[k] for k in sorted(names)]
 
     device = resolve_device(args.device)

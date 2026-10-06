@@ -51,16 +51,22 @@ def main() -> None:
     ap.add_argument("--max-det", type=int, default=1200, help="YOLO val cap / RF-DETR queries.")
     ap.add_argument("--variant", default="medium")
     ap.add_argument("--gradient-checkpointing", action="store_true", help="RF-DETR only.")
+    ap.add_argument("--expand8", action="store_true",
+                    help="Train on the 8 rotations/mirrors of every training image. Epochs and "
+                         "patience are divided by 8 to keep the optimiser-step budget; outputs go "
+                         "to fold<k>_x8.")
     ap.add_argument("--extra", nargs=argparse.REMAINDER, default=[],
                     help="Anything after --extra goes to the training script verbatim.")
     a = ap.parse_args()
 
     r = RECIPE[a.algo]
-    epochs = a.epochs or (2 if a.smoke else r["epochs"])
+    scale = 8 if a.expand8 else 1
+    epochs = a.epochs or (2 if a.smoke else max(1, round(r["epochs"] / scale)))
+    patience = max(3, round(r["patience"] / scale))
     batch = a.batch or r["batch"]
     env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
     for k in a.folds:
-        name = f"fold{k}" + ("_smoke" if a.smoke else "")
+        name = f"fold{k}" + ("_x8" if a.expand8 else "") + ("_smoke" if a.smoke else "")
         out = OUT_DIR / a.algo / name
         best = out / BEST[a.algo]
         if best.exists() and not a.force:
@@ -69,12 +75,16 @@ def main() -> None:
         data = OUT_DIR / "folds" / f"fold{k}" / "data.yaml"
         if not data.exists():
             sys.exit(f"missing {data}: run scripts/compare_folds.py first")
+        import yaml
+        already_expanded = bool((yaml.safe_load(data.read_text(encoding="utf-8")) or {}).get("expanded"))
         cmd = [sys.executable, "-m", MODULE[a.algo],
                "--data", str(data), "--weights", r["weights"],
                "--epochs", str(epochs), "--batch", str(batch), "--imgsz", str(a.imgsz),
                "--device", a.device, "--workers", str(a.workers),
                "--project", str(OUT_DIR / a.algo), "--name", name,
-               "--patience", str(r["patience"])]
+               "--patience", str(patience)]
+        if a.expand8 and not already_expanded:      # fold views built with --train-from are pre-expanded
+            cmd.append("--expand8")
         if a.algo == "yolov9":
             cmd += ["--save-period", "-1", "--max-det", str(a.max_det)]
         else:

@@ -67,6 +67,7 @@ def main() -> None:
     ap.add_argument("--algo", required=True, choices=("yolov9", "rfdetr"))
     ap.add_argument("--weights", default=None,
                     help="Per-fold weights pattern with {k}, e.g. runs/compare/yolov9/fold{k}/weights/best.pt")
+    ap.add_argument("--suffix", default="", help="Run-name suffix, e.g. _x8 for compare_train.py --expand8 runs.")
     ap.add_argument("--variant", default="medium", help="RF-DETR architecture of the checkpoints.")
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--conf", type=float, default=0.001)
@@ -79,7 +80,7 @@ def main() -> None:
 
     tag = a.tag or (a.algo + ("_tiled" if a.tiled else "")
                     + (f"_nms{a.nms_iou:g}" if a.algo == "yolov9" and a.nms_iou != 0.7 else ""))
-    pattern = a.weights or f"runs/compare/{a.algo}/fold{{k}}/{BEST[a.algo]}"
+    pattern = a.weights or f"runs/compare/{a.algo}/fold{{k}}{a.suffix}/{BEST[a.algo]}"
     plan = json.loads((EXP_DIR / "folds.json").read_text(encoding="utf-8"))
     gt = json.loads((OUT_DIR / "gt_all.json").read_text(encoding="utf-8"))
     names = [c["name"] for c in sorted(gt["categories"], key=lambda c: c["id"])]
