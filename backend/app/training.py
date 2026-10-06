@@ -1,15 +1,16 @@
 """
 backend/app/training.py
 =======================
-Spawns and manages the YOLOv9 training subprocess.
+Spawns and manages the training subprocess (YOLOv9 or RF-DETR).
 
 Only one training job is allowed at a time — concurrent runs would
 oversubscribe the GPU and produce garbage. ``start()`` raises
 :class:`RuntimeError` if a job is already in progress.
 
-The subprocess is ``python -m training.train ...`` so all the
-microscopy-tuned augmentation defaults stay in one place
-(``training/train.py``). We just supply CLI args.
+The subprocess is ``python -m training.train ...`` (YOLOv9) or
+``python -m training.train_rfdetr ...`` (RF-DETR) so all the recipe
+defaults stay in one place per algorithm. Both take the same CLI args;
+we just supply them.
 
 Logs are captured by a background reader thread into a bounded
 ``deque``; the polling endpoint reads the tail of it. We don't stream
@@ -62,6 +63,11 @@ log = logging.getLogger(__name__)
 # repo root regardless of where uvicorn was started.
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
+# Per-algorithm training entry point and where its best checkpoint lands.
+_TRAIN_MODULE = {"yolov9": "training.train", "rfdetr": "training.train_rfdetr"}
+_BEST_GLOB = {"yolov9": "**/{name}/weights/best.pt",
+              "rfdetr": "**/{name}/checkpoint_best_ema.pth"}
+
 
 class TrainingService:
     """Singleton owner of the training subprocess + log buffer."""
@@ -75,6 +81,7 @@ class TrainingService:
         self._finished_at: Optional[float] = None
         self._return_code: Optional[int] = None
         self._name: Optional[str] = None
+        self._algorithm: Optional[str] = None
         self._command: Optional[List[str]] = None
         self._reader: Optional[threading.Thread] = None
 
@@ -95,8 +102,11 @@ class TrainingService:
         imgsz: int,
         device: str,
         name: Optional[str] = None,
+        algorithm: str = "yolov9",
     ) -> dict:
         """Spawn a training run. Raises RuntimeError if one is in progress."""
+        if algorithm not in _TRAIN_MODULE:
+            raise ValueError(f"Unknown algorithm {algorithm!r}.")
         with self._lock:
             if self.is_running:
                 raise RuntimeError("A training run is already in progress.")
@@ -105,7 +115,7 @@ class TrainingService:
                 name = f"ecoli_{int(time.time())}"
 
             cmd: List[str] = [
-                sys.executable, "-m", "training.train",
+                sys.executable, "-m", _TRAIN_MODULE[algorithm],
                 "--data", data,
                 "--weights", weights,
                 "--epochs", str(epochs),
@@ -152,6 +162,7 @@ class TrainingService:
             self._finished_at = None
             self._return_code = None
             self._name = name
+            self._algorithm = algorithm
             self._command = cmd
             self._logs.clear()
             self._logs.append(f"$ {' '.join(cmd)}")
@@ -223,42 +234,44 @@ class TrainingService:
                     self._state = "completed" if rc == 0 else "failed"
                 completed_ok = self._state == "completed"
                 name = self._name
+                algorithm = self._algorithm or "yolov9"
             log.info("Training process exited with code %d (state=%s)",
                      rc, self._state)
             # On a clean finish, auto-deploy the run's best.pt as the
             # active model so inference uses it without a manual copy /
             # restart. Failures here are logged but never crash the reader.
             if completed_ok and name:
-                self._auto_activate_best(name)
+                self._auto_activate_best(name, algorithm)
 
     # ----------------------------------------------------------------------
 
-    def _find_best_weights(self, name: str) -> Optional[Path]:
-        """Locate ``best.pt`` for a finished run by its (unique) name.
+    def _find_best_weights(self, name: str, algorithm: str = "yolov9") -> Optional[Path]:
+        """Locate the best checkpoint for a finished run by its (unique) name.
 
         Ultralytics nests the run dir differently depending on its global
         settings, so we glob the repo for ``**/<name>/weights/best.pt``
-        rather than hard-coding a path, and take the newest match.
+        (RF-DETR: ``**/<name>/checkpoint_best_ema.pth``) rather than
+        hard-coding a path, and take the newest match.
         """
-        matches = list(_REPO_ROOT.glob(f"**/{name}/weights/best.pt"))
+        matches = list(_REPO_ROOT.glob(_BEST_GLOB[algorithm].format(name=name)))
         if not matches:
             return None
         return max(matches, key=lambda p: p.stat().st_mtime)
 
-    def _auto_activate_best(self, name: str) -> None:
-        """Copy the finished run's best.pt over the active model + reload."""
+    def _auto_activate_best(self, name: str, algorithm: str = "yolov9") -> None:
+        """Copy the finished run's best checkpoint over the active model + reload."""
         # Imported here (not at module top) to avoid a request-time import
         # cycle and to keep the training module standalone-importable.
         from .detector import service as detector_service
         try:
-            best = self._find_best_weights(name)
+            best = self._find_best_weights(name, algorithm)
             if best is None:
-                msg = (f"Auto-activate: no best.pt found for run {name!r}; "
+                msg = (f"Auto-activate: no best checkpoint found for {algorithm} run {name!r}; "
                        f"active model left unchanged.")
                 log.warning(msg)
                 self._logs.append(f"[{msg}]")
                 return
-            info = detector_service.activate_weights(str(best))
+            info = detector_service.activate_weights(str(best), algorithm)
             msg = (f"Auto-activated best weights: {best} → "
                    f"{info['active_weights']} (classes={info['classes']}).")
             log.info(msg)
@@ -277,6 +290,7 @@ class TrainingService:
     def _status_locked(self) -> dict:
         return {
             "state": self._state,
+            "algorithm": self._algorithm,
             "pid": self._proc.pid if (self._proc and self.is_running) else None,
             "started_at": self._started_at,
             "finished_at": self._finished_at,

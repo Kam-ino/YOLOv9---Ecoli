@@ -31,7 +31,7 @@ import cv2
 
 from src.capture import VideoSource, CaptureError
 from src.config import load_config
-from src.inference import YOLOv9Detector, InferenceError
+from src.inference import InferenceError, build_detector
 from src.logging_setup import setup_logging
 from src.preprocessing import apply_clahe
 from src.visualization import draw_detections, draw_hud
@@ -78,6 +78,12 @@ def _parse_args() -> argparse.Namespace:
         "--no-display",
         action="store_true",
         help="Disable the OpenCV preview window — useful headless / over SSH.",
+    )
+    parser.add_argument(
+        "--algorithm",
+        choices=("yolov9", "rfdetr"),
+        default=None,
+        help="Detector backend (default: model.algorithm from config).",
     )
     return parser.parse_args()
 
@@ -136,17 +142,10 @@ def main() -> None:
     source = _parse_source(args.source) if args.source is not None else cfg.capture.source
     log.info("Source: %r", source)
 
-    log.info("Loading YOLOv9 detector: weights=%s device=%s",
-             cfg.model.weights, cfg.model.device)
+    algorithm = args.algorithm or cfg.model.algorithm
+    log.info("Loading %s detector (device=%s)", algorithm, cfg.model.device)
     try:
-        detector = YOLOv9Detector(
-            weights_path=cfg.model.weights,
-            device=cfg.model.device,
-            imgsz=cfg.model.imgsz,
-            conf_threshold=cfg.model.conf_threshold,
-            iou_threshold=cfg.model.iou_threshold,
-            class_names=cfg.classes,
-        )
+        detector = build_detector(algorithm, cfg, class_names=cfg.classes)
     except InferenceError as exc:
         log.error("Failed to load detector: %s", exc)
         sys.exit(1)

@@ -37,6 +37,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from src.capture import CaptureError, VideoSource
+from src.inference import InferenceError
 from src.logging_setup import setup_logging
 from src.preprocessing import apply_clahe
 from src.visualization import draw_detections, draw_hud
@@ -46,7 +47,7 @@ from .dataset import (
 )
 from .detector import service
 from .schemas import (
-    AddClassRequest, DatasetEntry, DatasetEntryWithBoxes, DatasetStats,
+    AddClassRequest, AlgorithmInfo, DatasetEntry, DatasetEntryWithBoxes, DatasetStats,
     DetectionDTO, HealthResponse, LabelBox, PredictResponse,
     TrainStartRequest, TrainingStatusResponse,
 )
@@ -191,6 +192,23 @@ def _normalize_for_dataset(
     return buf.tobytes(), new_name
 
 
+def _detector_or_http(algorithm: Optional[str]):
+    """Resolve ``?algorithm=`` to a loaded detector, or raise the right HTTP error."""
+    try:
+        return service.get(algorithm)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except InferenceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+_ALGO_QUERY = Query(
+    None,
+    description="Detector to use: 'yolov9' or 'rfdetr'. Defaults to "
+                "model.algorithm from config.yaml.",
+)
+
+
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
@@ -233,6 +251,8 @@ def create_app() -> FastAPI:
             model_loaded=True,
             device=service.detector.device,
             classes=service.detector.class_names,
+            algorithm=service.default_algorithm,
+            algorithms={k: AlgorithmInfo(**v) for k, v in service.available().items()},
         )
 
     # -- /api/predict --------------------------------------------------------
@@ -248,9 +268,11 @@ def create_app() -> FastAPI:
                 "with clahe=true) so it isn't enhanced twice."
             ),
         ),
+        algorithm: Optional[str] = _ALGO_QUERY,
     ) -> PredictResponse:
         if not service.is_ready:
             raise HTTPException(status_code=503, detail="Detector not initialised.")
+        detector = _detector_or_http(algorithm)
 
         contents = await file.read()
         if not contents:
@@ -276,7 +298,7 @@ def create_app() -> FastAPI:
             t0 = time.perf_counter()
             # Still image: latency matters less than finding small cells on
             # a large slide, so allow native-resolution tiling.
-            dets = service.detector.predict(frame, tiled=True)
+            dets = detector.predict(frame, tiled=True)
             inference_ms = (time.perf_counter() - t0) * 1000.0
 
         return PredictResponse(
@@ -291,6 +313,7 @@ def create_app() -> FastAPI:
             ],
             image_size=(w, h),
             inference_ms=inference_ms,
+            algorithm=detector.algorithm,
         )
 
     # -- /api/stream ---------------------------------------------------------
@@ -310,9 +333,13 @@ def create_app() -> FastAPI:
                         "An additional UI floor on top of the model's own "
                         "conf_threshold — only ever raises it.",
         ),
+        algorithm: Optional[str] = _ALGO_QUERY,
     ) -> StreamingResponse:
         if not service.is_ready:
             raise HTTPException(status_code=503, detail="Detector not initialised.")
+        # Resolve here (not in the generator) so a bad name is a clean 400/503
+        # instead of a silently closed stream.
+        detector = _detector_or_http(algorithm)
 
         # Source param: numeric string → device index; otherwise treat as path/URL.
         src_val: Union[int, str]
@@ -324,7 +351,7 @@ def create_app() -> FastAPI:
         return StreamingResponse(
             _mjpeg_generator(
                 src_val, annotate=annotate, infer_every=infer_every,
-                min_conf=min_conf,
+                min_conf=min_conf, detector=detector,
             ),
             media_type="multipart/x-mixed-replace; boundary=frame",
         )
@@ -560,6 +587,8 @@ def create_app() -> FastAPI:
         # to cwd on every run. Ultralytics will fall back to its download
         # logic if neither path resolves to a file.
         weights = req.weights
+        if req.algorithm == "rfdetr" and weights == "yolov9c.pt":
+            weights = "medium"      # the schema default is YOLO-specific
         cached = Path("models") / weights
         if cached.is_file():
             weights = str(cached)
@@ -573,7 +602,10 @@ def create_app() -> FastAPI:
                 imgsz=req.imgsz,
                 device=req.device,
                 name=req.name,
+                algorithm=req.algorithm,
             ))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -588,7 +620,7 @@ def create_app() -> FastAPI:
     # -- /api/model/reset ----------------------------------------------------
 
     @app.post("/api/model/reset")
-    def model_reset() -> dict:
+    def model_reset(algorithm: Optional[str] = _ALGO_QUERY) -> dict:
         """Reset the active model back to the pretrained base.
 
         Renames the current fine-tuned weights to ``<name>.bak-<ts>.<ext>``
@@ -611,8 +643,10 @@ def create_app() -> FastAPI:
                 ),
             )
         try:
-            return service.reset()
-        except RuntimeError as exc:
+            return service.reset(algorithm)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (RuntimeError, InferenceError) as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     # -- Built React app (production) ---------------------------------------
@@ -674,6 +708,7 @@ def _mjpeg_generator(
     annotate: bool,
     infer_every: int = 1,
     min_conf: float = 0.0,
+    detector=None,
 ) -> Iterator[bytes]:
     """Yield multipart/MJPEG frames; optionally annotate each frame in-process.
 
@@ -684,6 +719,7 @@ def _mjpeg_generator(
     framerate is preserved.
     """
     cfg = service.config
+    det = detector if detector is not None else service.detector
     fps_window: list[float] = []
     consecutive_failures = 0
     last_dets: list = []          # most recent detection list, drawn on skip frames
@@ -718,7 +754,7 @@ def _mjpeg_generator(
                     # actually call the model.
                     if (frame_idx - 1) % infer_every == 0:
                         with service.lock:
-                            raw = service.detector.predict(frame)
+                            raw = det.predict(frame)
                         # UI confidence floor: drop weak detections before
                         # they reach the draw stage.
                         if min_conf > 0.0:

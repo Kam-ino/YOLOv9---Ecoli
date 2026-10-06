@@ -17,6 +17,9 @@ import yaml
 
 log = logging.getLogger(__name__)
 
+ALGORITHMS = ("yolov9", "rfdetr")
+RFDETR_VARIANTS = ("nano", "small", "medium", "large")
+
 
 @dataclass
 class ModelConfig:
@@ -25,6 +28,24 @@ class ModelConfig:
     imgsz: int
     conf_threshold: float
     iou_threshold: float
+    # Default detector for callers that don't pass ?algorithm=. Both
+    # detectors stay available regardless; this only picks the default.
+    algorithm: str = "yolov9"
+
+
+@dataclass
+class RFDETRConfig:
+    """RF-DETR detector settings (``rfdetr:`` block, optional in yaml).
+
+    ``weights`` is the fine-tuned checkpoint the Train tab writes; when the
+    file is missing the COCO-pretrained ``variant`` is served instead.
+    ``resolution`` must be a multiple of 32 and should match training.
+    ``num_queries`` caps detections per image (dense slides need >300).
+    """
+    weights: str = "models/best_rfdetr.pth"
+    variant: str = "medium"
+    resolution: int = 640
+    num_queries: int = 1200
 
 
 @dataclass
@@ -62,6 +83,7 @@ class AppConfig:
     classes: List[str]
     logging: LoggingConfig
     output: OutputConfig
+    rfdetr: RFDETRConfig
 
 
 def load_config(path: str) -> AppConfig:
@@ -91,6 +113,7 @@ def load_config(path: str) -> AppConfig:
         preproc = PreprocessingConfig(**raw["preprocessing"])
         logging_c = LoggingConfig(**raw["logging"])
         output = OutputConfig(**raw["output"])
+        rfdetr = RFDETRConfig(**(raw.get("rfdetr") or {}))
         classes = list(raw.get("classes", []))
     except (KeyError, TypeError) as exc:
         raise ValueError(
@@ -98,7 +121,7 @@ def load_config(path: str) -> AppConfig:
             f"Compare against the shipped config.yaml for the expected layout."
         ) from exc
 
-    _validate(model, classes)
+    _validate(model, classes, rfdetr)
 
     log.debug("Config loaded from %s", cfg_path)
     return AppConfig(
@@ -108,12 +131,29 @@ def load_config(path: str) -> AppConfig:
         classes=classes,
         logging=logging_c,
         output=output,
+        rfdetr=rfdetr,
     )
 
 
-def _validate(model: ModelConfig, classes: List[str]) -> None:
+def _validate(model: ModelConfig, classes: List[str], rfdetr: RFDETRConfig) -> None:
     if not classes:
         raise ValueError("config.yaml must declare at least one entry under 'classes'.")
+
+    if model.algorithm not in ALGORITHMS:
+        raise ValueError(
+            f"model.algorithm must be one of {ALGORITHMS} (got {model.algorithm!r})."
+        )
+    if rfdetr.variant not in RFDETR_VARIANTS:
+        raise ValueError(
+            f"rfdetr.variant must be one of {RFDETR_VARIANTS} (got {rfdetr.variant!r})."
+        )
+    # RF-DETR's DINOv2 backbone needs resolution % (patch_size * num_windows) == 0 (32).
+    if rfdetr.resolution <= 0 or rfdetr.resolution % 32 != 0:
+        raise ValueError(
+            f"rfdetr.resolution must be a positive multiple of 32 (got {rfdetr.resolution})."
+        )
+    if rfdetr.num_queries < 1:
+        raise ValueError(f"rfdetr.num_queries must be >= 1 (got {rfdetr.num_queries}).")
 
     # YOLO requires image dims to be multiples of the maximum stride (32).
     if model.imgsz <= 0 or model.imgsz % 32 != 0:

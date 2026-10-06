@@ -17,6 +17,14 @@ function api(path: string): string {
   return `${API_BASE}${path}`
 }
 
+// Detector backends the API can serve. Mirrors src/config.py ALGORITHMS.
+export type Algorithm = 'yolov9' | 'rfdetr'
+export const ALGORITHMS: Algorithm[] = ['yolov9', 'rfdetr']
+export const ALGORITHM_LABEL: Record<Algorithm, string> = {
+  yolov9: 'YOLOv9',
+  rfdetr: 'RF-DETR',
+}
+
 export type Detection = {
   bbox: [number, number, number, number]
   class_id: number
@@ -28,6 +36,17 @@ export type PredictResponse = {
   detections: Detection[]
   image_size: [number, number]
   inference_ms: number
+  algorithm: Algorithm
+}
+
+export type AlgorithmInfo = {
+  available: boolean       // python package importable
+  loaded: boolean          // model built in the backend process
+  weights: string
+  weights_exists: boolean  // fine-tuned file present (else COCO base)
+  classes: string[]
+  device: string | null
+  error: string | null
 }
 
 export type HealthInfo = {
@@ -35,6 +54,8 @@ export type HealthInfo = {
   model_loaded: boolean
   device: string
   classes: string[]
+  algorithm: Algorithm                          // backend default
+  algorithms: Partial<Record<Algorithm, AlgorithmInfo>>
 }
 
 export async function fetchHealth(): Promise<HealthInfo> {
@@ -45,14 +66,16 @@ export async function fetchHealth(): Promise<HealthInfo> {
 
 export async function predict(
   file: File,
-  opts: { preprocess?: boolean } = {},
+  opts: { preprocess?: boolean; algorithm?: Algorithm } = {},
 ): Promise<PredictResponse> {
   const fd = new FormData()
   fd.append('file', file)
   // preprocess=false → image is already CLAHE-enhanced; don't double-apply.
   const preprocess = opts.preprocess ?? true
+  const params = new URLSearchParams({ preprocess: String(preprocess) })
+  if (opts.algorithm) params.set('algorithm', opts.algorithm)
   const r = await fetch(
-    api(`/api/predict?preprocess=${preprocess}`),
+    api(`/api/predict?${params.toString()}`),
     { method: 'POST', body: fd },
   )
   if (!r.ok) {
@@ -65,6 +88,7 @@ export async function predict(
 export type StreamOpts = {
   minConf?: number
   annotate?: boolean
+  algorithm?: Algorithm
 }
 
 export function streamUrl(
@@ -80,6 +104,7 @@ export function streamUrl(
   })
   if (opts.minConf != null) params.set('min_conf', String(opts.minConf))
   if (opts.annotate != null) params.set('annotate', String(opts.annotate))
+  if (opts.algorithm) params.set('algorithm', opts.algorithm)
   return api(`/api/stream?${params.toString()}`)
 }
 
@@ -259,6 +284,7 @@ export type TrainState = 'idle' | 'running' | 'completed' | 'failed' | 'killed'
 
 export type TrainingStatus = {
   state: TrainState
+  algorithm: Algorithm | null
   pid: number | null
   started_at: number | null
   finished_at: number | null
@@ -269,6 +295,7 @@ export type TrainingStatus = {
 }
 
 export type TrainStartRequest = {
+  algorithm?: Algorithm
   weights?: string
   epochs?: number
   batch?: number
@@ -305,14 +332,16 @@ export async function stopTraining(): Promise<TrainingStatus> {
 // ---- Model reset ----------------------------------------------------------
 
 export type ResetResult = {
+  algorithm: Algorithm
   backup: string | null
   active_weights: string
   classes: string[]
   device: string
 }
 
-export async function resetModel(): Promise<ResetResult> {
-  const r = await fetch(api('/api/model/reset'), { method: 'POST' })
+export async function resetModel(algorithm?: Algorithm): Promise<ResetResult> {
+  const q = algorithm ? `?algorithm=${algorithm}` : ''
+  const r = await fetch(api(`/api/model/reset${q}`), { method: 'POST' })
   if (!r.ok) {
     const text = await r.text().catch(() => '')
     throw new Error(`/api/model/reset → ${r.status}: ${text || r.statusText}`)

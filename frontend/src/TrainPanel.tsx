@@ -1,12 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  ALGORITHMS,
+  ALGORITHM_LABEL,
   fetchTrainingStatus,
   resetModel,
   startTraining,
   stopTraining,
+  type Algorithm,
   type TrainingStatus,
 } from './api'
 import TrainingConsole from './TrainingConsole'
+import { useAlgorithm } from './useAlgorithm'
+
+// Per-algorithm form defaults. RF-DETR: COCO-pretrained variant name as
+// "weights", smaller batch (DINOv2 backbone at 640 px on an 8 GB GPU).
+const DEFAULTS: Record<Algorithm, { weights: string; epochs: number; batch: number }> = {
+  yolov9: { weights: 'yolov9c.pt', epochs: 250, batch: 16 },
+  rfdetr: { weights: 'medium', epochs: 200, batch: 4 },
+}
+const ACTIVE_WEIGHTS: Record<Algorithm, string> = {
+  yolov9: 'models/best_yolov9c.pt',
+  rfdetr: 'models/best_rfdetr.pth',
+}
+const BEST_FILE: Record<Algorithm, string> = {
+  yolov9: 'weights/best.pt',
+  rfdetr: 'checkpoint_best_ema.pth',
+}
 
 // Polls /api/train/status. Adapts the interval: fast while a run is
 // active, slow otherwise — keeps idle CPU/network noise down without
@@ -17,9 +36,10 @@ const POLL_IDLE_MS = 10_000
 
 export default function TrainPanel() {
   const [status, setStatus] = useState<TrainingStatus | null>(null)
-  const [weights, setWeights] = useState('yolov9c.pt')
-  const [epochs, setEpochs] = useState(250)
-  const [batch, setBatch] = useState(16)
+  const [algorithm, setAlgorithmStored] = useAlgorithm()
+  const [weights, setWeights] = useState(DEFAULTS[algorithm].weights)
+  const [epochs, setEpochs] = useState(DEFAULTS[algorithm].epochs)
+  const [batch, setBatch] = useState(DEFAULTS[algorithm].batch)
   const [imgsz, setImgsz] = useState(640)
   const [device, setDevice] = useState('auto')
   const [error, setError] = useState<string | null>(null)
@@ -78,19 +98,26 @@ export default function TrainPanel() {
     prevStateRef.current = status.state
   }, [status])
 
+  const onAlgorithm = useCallback((a: Algorithm) => {
+    setAlgorithmStored(a)
+    setWeights(DEFAULTS[a].weights)
+    setEpochs(DEFAULTS[a].epochs)
+    setBatch(DEFAULTS[a].batch)
+  }, [setAlgorithmStored])
+
   const onStart = useCallback(async () => {
     setBusy(true)
     setError(null)
     userClosedRef.current = false
     setConsoleOpen(true)
     try {
-      setStatus(await startTraining({ weights, epochs, batch, imgsz, device }))
+      setStatus(await startTraining({ algorithm, weights, epochs, batch, imgsz, device }))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
     }
-  }, [weights, epochs, batch, imgsz, device])
+  }, [algorithm, weights, epochs, batch, imgsz, device])
 
   const onStop = useCallback(async () => {
     setBusy(true); setError(null)
@@ -124,24 +151,25 @@ export default function TrainPanel() {
       setError("Stop the training run before resetting the model.")
       return
     }
+    const active = ACTIVE_WEIGHTS[algorithm]
     const ok = window.confirm(
-      "Reset the model to the pretrained base?\n\n" +
-      "• Your current trained weights will be moved to models/ecoli_yolov9c.bak-<timestamp>.pt (recoverable).\n" +
-      "• The detector reloads from the COCO base — the badge will flip back to 80 classes.\n" +
+      `Reset the ${ALGORITHM_LABEL[algorithm]} model to the pretrained base?\n\n` +
+      `• Your current trained weights will be moved to ${active.replace(/(\.\w+)$/, '.bak-<timestamp>$1')} (recoverable).\n` +
+      "• The detector reloads from the COCO base — it will report 80 classes.\n" +
       "• Your labels and dataset are NOT touched. Re-run training to fine-tune from scratch.",
     )
     if (!ok) return
     setResetting(true); setError(null); setInfo(null)
     try {
-      const result = await resetModel()
+      const result = await resetModel(algorithm)
       const backed = result.backup ? ` (backup: ${result.backup})` : ''
-      setInfo(`Model reset — detector is now serving the base ${result.active_weights}${backed}.`)
+      setInfo(`${ALGORITHM_LABEL[algorithm]} reset — now serving the base ${result.active_weights}${backed}.`)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setResetting(false)
     }
-  }, [running])
+  }, [running, algorithm])
 
   return (
     <div className="train-panel">
@@ -149,10 +177,24 @@ export default function TrainPanel() {
 
       <div className="train-form">
         <label>
+          <span>Algorithm</span>
+          <select
+            value={algorithm}
+            onChange={(e) => onAlgorithm(e.target.value as Algorithm)}
+            disabled={running || busy}
+          >
+            {ALGORITHMS.map((a) => <option key={a} value={a}>{ALGORITHM_LABEL[a]}</option>)}
+          </select>
+        </label>
+        <label>
           <span>Weights</span>
           <input
             type="text" value={weights}
             onChange={(e) => setWeights(e.target.value)}
+            placeholder={algorithm === 'rfdetr' ? 'nano | small | medium | large | file.pth' : 'yolov9c.pt'}
+            title={algorithm === 'rfdetr'
+              ? 'COCO-pretrained variant name, or a .pth checkpoint to continue from'
+              : 'Pretrained .pt name (auto-downloaded) or a file under models/'}
             disabled={running || busy}
           />
         </label>
@@ -225,9 +267,9 @@ export default function TrainPanel() {
       {status?.state === 'completed' && status.name && (
         <p className="muted small" style={{ marginTop: 8 }}>
           Best weights:&nbsp;
-          <code>runs/train/{status.name}/weights/best.pt</code>
-          . Copy it to <code>models/ecoli_yolov9c.pt</code> and switch the
-          backend to <code>config.yaml</code> to deploy.
+          <code>runs/train/{status.name}/{BEST_FILE[status.algorithm ?? 'yolov9']}</code>
+          &nbsp;— auto-activated as <code>{ACTIVE_WEIGHTS[status.algorithm ?? 'yolov9']}</code>
+          (previous weights kept as a <code>.bak-&lt;timestamp&gt;</code> file).
         </p>
       )}
 
@@ -243,7 +285,7 @@ export default function TrainPanel() {
               : "Move trained weights to a .bak file and reload from pretrained base"
           }
         >
-          {resetting ? 'Resetting…' : 'Reset model to pretrained base'}
+          {resetting ? 'Resetting…' : `Reset ${ALGORITHM_LABEL[algorithm]} to pretrained base`}
         </button>
       </div>
 

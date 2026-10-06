@@ -17,6 +17,17 @@ class PredictResponse(BaseModel):
     detections: List[DetectionDTO]
     image_size: Tuple[int, int] = Field(..., description="(width, height)")
     inference_ms: float
+    algorithm: str = "yolov9"     # which detector produced these boxes
+
+
+class AlgorithmInfo(BaseModel):
+    available: bool               # python package importable
+    loaded: bool                  # detector built in this process
+    weights: str                  # configured weights path
+    weights_exists: bool          # fine-tuned file present (else COCO base)
+    classes: List[str] = []
+    device: Optional[str] = None
+    error: Optional[str] = None   # last load failure, if any
 
 
 class HealthResponse(BaseModel):
@@ -24,6 +35,8 @@ class HealthResponse(BaseModel):
     model_loaded: bool
     device: str
     classes: List[str]
+    algorithm: str = "yolov9"     # default algorithm (config model.algorithm)
+    algorithms: Dict[str, AlgorithmInfo] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +90,9 @@ class AddClassRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 class TrainStartRequest(BaseModel):
+    algorithm: str = "yolov9"     # "yolov9" | "rfdetr"
+    # yolov9: a .pt (auto-downloaded name or models/<file>). rfdetr: a
+    # variant name (nano|small|medium|large = COCO-pretrained) or a .pth.
     weights: str = "yolov9c.pt"
     epochs: int = Field(100, ge=1, le=2000)
     batch: int = Field(16, ge=1, le=256)
@@ -87,6 +103,7 @@ class TrainStartRequest(BaseModel):
 
 class TrainingStatusResponse(BaseModel):
     state: str                    # idle | running | completed | failed | killed
+    algorithm: Optional[str] = None
     pid: Optional[int] = None
     started_at: Optional[float] = None
     finished_at: Optional[float] = None

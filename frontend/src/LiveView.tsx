@@ -11,6 +11,9 @@ import {
   type LabelBox,
   type Split,
 } from './api'
+import type { Algorithm } from './api'
+import AlgorithmToggle from './AlgorithmToggle'
+import { useAlgorithm } from './useAlgorithm'
 import LabelCanvas from './LabelCanvas'
 
 // After Stop / hiding the stream <img>, the MJPEG generator needs a
@@ -55,12 +58,15 @@ async function snapshotWithRetry(
 // the same flow as the Upload tab, but sourced from the live camera.
 export default function LiveView() {
   const [source, setSource] = useState('0')
+  const [algorithm, setAlgorithm] = useAlgorithm()
   const [inferEvery, setInferEvery] = useState(3)
   const [minConf, setMinConf] = useState(0.25)
   // The confidence currently baked into the live stream connection. A
   // debounce copies `minConf` here so dragging doesn't reopen the camera
   // on every tick; changing it forces a stream reconnect.
   const [appliedConf, setAppliedConf] = useState(0.25)
+  // Same idea for the detector: the one baked into the stream URL.
+  const [appliedAlgo, setAppliedAlgo] = useState<Algorithm>(algorithm)
   const [running, setRunning] = useState(false)
   const [bust, setBust] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -89,23 +95,24 @@ export default function LiveView() {
   const start = () => {
     setError(null)
     setAppliedConf(minConf)
+    setAppliedAlgo(algorithm)
     setBust((b) => b + 1)
     setRunning(true)
   }
   const stop = () => setRunning(false)
 
-  // True while the confidence slider differs from what the stream is
-  // currently using — i.e. a reconnect is pending.
-  const settingsDirty = running && minConf !== appliedConf
+  // True while the confidence slider or detector differs from what the
+  // stream is currently using — i.e. a reconnect is pending.
+  const settingsDirty = running && (minConf !== appliedConf || algorithm !== appliedAlgo)
 
   // While running, debounce slider changes into the stream URL: 350ms
   // after the last adjustment, reconnect with the new threshold. The
   // changed query param is what triggers the <img> to reconnect.
   useEffect(() => {
     if (!settingsDirty) return
-    const id = setTimeout(() => setAppliedConf(minConf), 350)
+    const id = setTimeout(() => { setAppliedConf(minConf); setAppliedAlgo(algorithm) }, 350)
     return () => clearTimeout(id)
-  }, [settingsDirty, minConf])
+  }, [settingsDirty, minConf, algorithm])
 
   // Freeze the current frame for labelling. Setting busy unmounts the
   // stream <img> (see the render gate), which releases the camera so the
@@ -123,7 +130,7 @@ export default function LiveView() {
       try {
         // preprocess=false → the snapshot is already CLAHE-enhanced, so
         // don't let predict apply CLAHE a second time.
-        const res = await predict(file, { preprocess: false })
+        const res = await predict(file, { preprocess: false, algorithm })
         // Only pre-fill detections that pass the Min confidence slider —
         // same threshold the live overlay uses. Without this the canvas
         // floods with every weak box down to the model's 0.01 floor.
@@ -144,7 +151,7 @@ export default function LiveView() {
     } finally {
       setBusy(false)
     }
-  }, [source, editUrl, minConf])
+  }, [source, editUrl, minConf, algorithm])
 
   const deleteBox = useCallback((idx: number) => {
     setEditBoxes((prev) => prev.filter((_, i) => i !== idx))
@@ -174,9 +181,10 @@ export default function LiveView() {
     setSaveMsg(null); setError(null)
     // Reconnect the stream (it was unmounted during the edit session).
     setAppliedConf(minConf)
+    setAppliedAlgo(algorithm)
     setBust((b) => b + 1)
     setRunning(true)
-  }, [editUrl, minConf])
+  }, [editUrl, minConf, algorithm])
 
   // ---- Edit mode: clean frozen frame + editable boxes + save ----------
   if (editing) {
@@ -287,6 +295,7 @@ export default function LiveView() {
             disabled={running}
           />
         </label>
+        <AlgorithmToggle value={algorithm} onChange={setAlgorithm} disabled={busy} />
         <label className="conf-filter">
           <span>Infer every <strong>{inferEvery}</strong></span>
           <input
@@ -333,7 +342,7 @@ export default function LiveView() {
         ) : running ? (
           <img
             className="stream-img"
-            src={streamUrl(source, inferEvery, bust, { minConf: appliedConf })}
+            src={streamUrl(source, inferEvery, bust, { minConf: appliedConf, algorithm: appliedAlgo })}
             alt="live stream"
             onError={() => {
               setError('Stream ended or failed (camera busy / source invalid).')

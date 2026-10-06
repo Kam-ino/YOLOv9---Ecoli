@@ -425,6 +425,19 @@ code {
 .train-form input:disabled {
   opacity: 0.5;
 }
+.train-form select {
+  background: var(--bg-elev-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 5px 8px;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  font-family: inherit;
+  width: 100%;
+}
+.train-form select:disabled {
+  opacity: 0.5;
+}
 
 .train-actions {
   display: flex;

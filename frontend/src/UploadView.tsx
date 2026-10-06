@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  ALGORITHM_LABEL,
   predict,
   colorForClass,
   detectionsToLabelBoxes,
@@ -8,6 +9,8 @@ import {
   type PredictResponse,
 } from './api'
 import DetectionOverlay from './DetectionOverlay'
+import AlgorithmToggle from './AlgorithmToggle'
+import { useAlgorithm } from './useAlgorithm'
 
 
 // Shape of the data we hand off via React Router's navigate state when
@@ -29,6 +32,7 @@ export default function UploadView() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confFilter, setConfFilter] = useState(0.0)
+  const [algorithm, setAlgorithm] = useAlgorithm()
 
   const onPick = useCallback((f: File) => {
     setFile(f)
@@ -49,13 +53,13 @@ export default function UploadView() {
       // preprocess=false: uploaded files are stored and trained on as-is
       // (only stream frames are CLAHE-enhanced, and those arrive enhanced).
       // Enhancing uploads at inference only lowered recall on held-out slides.
-      setResult(await predict(file, { preprocess: false }))
+      setResult(await predict(file, { preprocess: false, algorithm }))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
     }
-  }, [file])
+  }, [file, algorithm])
 
   const filtered = useMemo(
     () => (result?.detections ?? []).filter((d) => d.confidence >= confFilter),
@@ -90,6 +94,12 @@ export default function UploadView() {
           type="file"
           accept="image/*"
           onChange={(e) => e.target.files?.[0] && onPick(e.target.files[0])}
+        />
+        <AlgorithmToggle
+          value={algorithm}
+          // Boxes from the other model would be misleading: drop them.
+          onChange={(a) => { setAlgorithm(a); setResult(null) }}
+          disabled={loading}
         />
         <button onClick={onSubmit} disabled={!file || loading}>
           {loading ? 'Running…' : 'Detect'}
@@ -151,7 +161,9 @@ function DetectionList({
           <strong>{filteredCount}</strong>
           <span className="muted"> / {result.detections.length} detections</span>
         </div>
-        <div className="muted">{result.inference_ms.toFixed(0)} ms inference</div>
+        <div className="muted">
+          {ALGORITHM_LABEL[result.algorithm] ?? result.algorithm ?? 'YOLOv9'} · {result.inference_ms.toFixed(0)} ms inference
+        </div>
         <div className="muted">{result.image_size[0]} × {result.image_size[1]} px</div>
       </div>
       {shown.length === 0 ? (

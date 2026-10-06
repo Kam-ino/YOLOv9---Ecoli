@@ -2,6 +2,10 @@
 # Edit this file (or copy it and pass --config) to tune runtime behaviour.
 
 model:
+  # Which detector answers requests that don't say ?algorithm=...
+  # Both stay available in the UI toggle; this is only the default.
+  algorithm: yolov9        # yolov9 | rfdetr
+
   # Path to YOLOv9 weights. .pt or .onnx are both supported transparently
   # by the Ultralytics loader. The repo does not ship trained weights —
   # fine-tune your own (see README / training/train.py) and place them here.
@@ -21,6 +25,19 @@ model:
 
   # Non-max-suppression IoU threshold. Lower = stricter de-duplication.
   iou_threshold: 0.45
+
+rfdetr:
+  # Fine-tuned RF-DETR checkpoint written by the Train tab
+  # (training/train_rfdetr.py). If the file is missing, the COCO-pretrained
+  # variant below is served instead (80 classes = "untrained").
+  weights: models/best_rfdetr.pth
+  variant: medium           # nano | small | medium | large
+  # Square input size; multiple of 32. Must match what the checkpoint was
+  # trained at. 640 = same long side as YOLOv9's imgsz above.
+  resolution: 640
+  # Max detections per image. RF-DETR has no NMS; this is the number of
+  # decoder queries. Dense stained slides exceed the library default (300).
+  num_queries: 1200
 
 capture:
   # USB device index (int), file path (str), or rtsp:// URL (str).

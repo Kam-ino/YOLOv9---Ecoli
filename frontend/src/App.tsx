@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, NavLink, Route, Routes, Navigate } from 'react-router-dom'
-import { fetchHealth, type HealthInfo } from './api'
+import { ALGORITHM_LABEL, fetchHealth, type HealthInfo } from './api'
 import UploadView from './UploadView'
 import LiveView from './LiveView'
 import LabelView from './LabelView'
@@ -82,7 +82,9 @@ function HealthBadge({ health, error }: { health: HealthInfo | null; error: stri
   const cls = health.model_loaded ? 'badge-ok' : 'badge-warn'
   return (
     <span className={`badge ${cls}`}>
-      {health.status} · {health.device} · {health.classes.length} class{health.classes.length === 1 ? '' : 'es'}
+      {health.status}
+      {health.algorithm ? ` · ${ALGORITHM_LABEL[health.algorithm] ?? health.algorithm}` : ''}
+      {' · '}{health.device} · {health.classes.length} class{health.classes.length === 1 ? '' : 'es'}
     </span>
   )
 }

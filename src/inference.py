@@ -1,11 +1,15 @@
 """
 src/inference.py
 ================
-YOLOv9 detector wrapper.
+Detector wrappers with one uniform API.
 
-Loads YOLOv9 weights (PyTorch ``.pt`` or ONNX ``.onnx``) via Ultralytics
-and exposes a uniform :meth:`YOLOv9Detector.predict` API that takes a
-BGR numpy frame and returns a list of :class:`Detection` objects.
+Two backends share the same frame-in / detections-out contract:
+
+* :class:`YOLOv9Detector` — Ultralytics YOLOv9 (``.pt`` / ``.onnx``), NMS-based.
+* :class:`RFDETRDetector` — Roboflow RF-DETR (DINOv2 + DETR decoder), NMS-free.
+
+Both take a BGR numpy frame and return a list of :class:`Detection`; the
+tiling logic for large slides lives once in :class:`_Detector`.
 
 Library choice — Ultralytics vs WongKinYiu/yolov9
 -------------------------------------------------
@@ -47,6 +51,9 @@ TILE_OVERLAP = 0.2
 # A tile box ending this close to an interior tile edge is a cut-off object
 # that a neighbouring tile sees whole: drop it.
 TILE_EDGE_PX = 2
+
+ALGORITHMS = ("yolov9", "rfdetr")
+RFDETR_VARIANTS = ("nano", "small", "medium", "large")
 
 
 def tile_origins(size: int, tile: int, overlap: float = TILE_OVERLAP) -> List[int]:
@@ -118,69 +125,28 @@ def _resolve_device(spec: str) -> str:
     return spec
 
 
-class YOLOv9Detector:
-    """Thin, frame-in / detections-out wrapper around ultralytics.YOLO."""
+RawBatch = List[Tuple[np.ndarray, np.ndarray, np.ndarray]]
 
-    def __init__(
-        self,
-        weights_path: str,
-        device: str = "auto",
-        imgsz: int = 640,
-        conf_threshold: float = 0.25,
-        iou_threshold: float = 0.45,
-        class_names: Optional[Sequence[str]] = None,
-        warmup: bool = True,
-    ):
-        weights = Path(weights_path)
-        if not weights.exists():
-            raise InferenceError(
-                f"Model weights not found: {weights}. "
-                "Either fine-tune your own (see training/train.py) "
-                "and place them here, or update model.weights in config.yaml."
-            )
 
-        try:
-            from ultralytics import YOLO  # heavy import — keep inside __init__
-        except ImportError as exc:
-            raise InferenceError(
-                "ultralytics is not installed. Run: pip install -r requirements.txt"
-            ) from exc
+class _Detector:
+    """Shared frame-in / detections-out logic.
 
-        try:
-            self.model = YOLO(str(weights))
-        except Exception as exc:  # Ultralytics raises a variety of types
-            raise InferenceError(
-                f"Failed to load YOLOv9 model from {weights}: {exc}"
-            ) from exc
+    Subclasses set ``imgsz``, ``conf``, ``iou``, ``max_det``, ``device``,
+    ``class_names`` and implement :meth:`_raw`. Everything else — tiling,
+    tile merging, the :class:`Detection` conversion — lives here once.
+    """
 
-        self.device = _resolve_device(device)
-        self.imgsz = int(imgsz)
-        self.conf = float(conf_threshold)
-        self.iou = float(iou_threshold)
+    algorithm: str = "?"
+    imgsz: int
+    conf: float
+    iou: float
+    max_det: int
+    device: str
+    class_names: List[str]
 
-        # Prefer explicit class_names from config (authoritative). Fall
-        # back to the model's embedded names (a dict on Ultralytics
-        # models). Last resort: a single 'object' label so we never
-        # crash on label lookups.
-        model_names = getattr(self.model, "names", None)
-        if class_names:
-            self.class_names: List[str] = list(class_names)
-        elif isinstance(model_names, dict):
-            self.class_names = [model_names[i] for i in sorted(model_names)]
-        elif isinstance(model_names, (list, tuple)):
-            self.class_names = list(model_names)
-        else:
-            self.class_names = ["object"]
-
-        log.info(
-            "Detector ready: weights=%s backend=ultralytics device=%s "
-            "imgsz=%d conf=%.2f iou=%.2f classes=%s",
-            weights, self.device, self.imgsz, self.conf, self.iou,
-            self.class_names,
-        )
-
-        if warmup:
-            self._warmup()
+    def _raw(self, images: List[np.ndarray]) -> RawBatch:
+        """Per BGR image: ``(xyxy, conf, class_id)`` numpy arrays in image pixels."""
+        raise NotImplementedError
 
     def _warmup(self) -> None:
         """Run one dummy inference so the first real frame isn't slow.
@@ -190,41 +156,10 @@ class YOLOv9Detector:
         a visible hitch on a "live" feed.
         """
         try:
-            dummy = np.zeros((self.imgsz, self.imgsz, 3), dtype=np.uint8)
-            self.model.predict(
-                dummy,
-                imgsz=self.imgsz,
-                conf=self.conf,
-                iou=self.iou,
-                device=self.device,
-                verbose=False,
-            )
+            self._raw([np.zeros((self.imgsz, self.imgsz, 3), dtype=np.uint8)])
             log.debug("Warmup inference complete.")
         except Exception as exc:  # non-fatal
             log.warning("Warmup inference failed (continuing): %s", exc)
-
-    def _raw(self, images: List[np.ndarray]) -> List[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
-        """Per image: ``(xyxy, conf, class_id)`` numpy arrays, post-NMS."""
-        try:
-            results = self.model.predict(
-                images,
-                imgsz=self.imgsz,
-                conf=self.conf,
-                iou=self.iou,
-                max_det=MAX_DET,
-                device=self.device,
-                verbose=False,
-            )
-        except Exception as exc:
-            raise InferenceError(f"model.predict raised: {exc}") from exc
-        # Ultralytics returns torch tensors on the inference device;
-        # move to CPU + numpy for downstream visualization / JSON.
-        return [
-            (r.boxes.xyxy.cpu().numpy().reshape(-1, 4),
-             r.boxes.conf.cpu().numpy(),
-             r.boxes.cls.cpu().numpy().astype(int))
-            for r in results
-        ]
 
     def _tiled(self, frame: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Whole frame (catches large clusters) + native-resolution tiles
@@ -255,7 +190,7 @@ class YOLOv9Detector:
         idx = batched_nms(
             torch.from_numpy(xyxy).float(), torch.from_numpy(confs).float(),
             torch.from_numpy(cls_ids), self.iou,
-        ).numpy()[:MAX_DET * 3]
+        ).numpy()[:self.max_det * 3]
         return xyxy[idx], confs[idx], cls_ids[idx]
 
     def predict(self, frame: np.ndarray, tiled: bool = False) -> List[Detection]:
@@ -267,8 +202,8 @@ class YOLOv9Detector:
         the live stream does not.
 
         Returns an empty list when there are no detections above
-        ``conf_threshold`` after NMS. Raises :class:`InferenceError`
-        for genuinely broken input or model failure.
+        ``conf_threshold``. Raises :class:`InferenceError` for genuinely
+        broken input or model failure.
         """
         if frame is None or frame.size == 0:
             raise InferenceError("Received empty frame for inference.")
@@ -298,3 +233,239 @@ class YOLOv9Detector:
                 )
             )
         return detections
+
+
+class YOLOv9Detector(_Detector):
+    """Thin, frame-in / detections-out wrapper around ultralytics.YOLO."""
+
+    algorithm = "yolov9"
+
+    def __init__(
+        self,
+        weights_path: str,
+        device: str = "auto",
+        imgsz: int = 640,
+        conf_threshold: float = 0.25,
+        iou_threshold: float = 0.45,
+        class_names: Optional[Sequence[str]] = None,
+        warmup: bool = True,
+        max_det: int = MAX_DET,
+    ):
+        weights = Path(weights_path)
+        if not weights.exists():
+            raise InferenceError(
+                f"Model weights not found: {weights}. "
+                "Either fine-tune your own (see training/train.py) "
+                "and place them here, or update model.weights in config.yaml."
+            )
+
+        try:
+            from ultralytics import YOLO  # heavy import — keep inside __init__
+        except ImportError as exc:
+            raise InferenceError(
+                "ultralytics is not installed. Run: pip install -r requirements.txt"
+            ) from exc
+
+        try:
+            self.model = YOLO(str(weights))
+        except Exception as exc:  # Ultralytics raises a variety of types
+            raise InferenceError(
+                f"Failed to load YOLOv9 model from {weights}: {exc}"
+            ) from exc
+
+        self.device = _resolve_device(device)
+        self.imgsz = int(imgsz)
+        self.conf = float(conf_threshold)
+        self.iou = float(iou_threshold)
+        self.max_det = int(max_det)
+
+        # Prefer explicit class_names from config (authoritative). Fall
+        # back to the model's embedded names (a dict on Ultralytics
+        # models). Last resort: a single 'object' label so we never
+        # crash on label lookups.
+        model_names = getattr(self.model, "names", None)
+        if class_names:
+            self.class_names: List[str] = list(class_names)
+        elif isinstance(model_names, dict):
+            self.class_names = [model_names[i] for i in sorted(model_names)]
+        elif isinstance(model_names, (list, tuple)):
+            self.class_names = list(model_names)
+        else:
+            self.class_names = ["object"]
+
+        log.info(
+            "Detector ready: weights=%s backend=ultralytics device=%s "
+            "imgsz=%d conf=%.2f iou=%.2f classes=%s",
+            weights, self.device, self.imgsz, self.conf, self.iou,
+            self.class_names,
+        )
+
+        if warmup:
+            self._warmup()
+
+    def _raw(self, images: List[np.ndarray]) -> RawBatch:
+        """Per image: ``(xyxy, conf, class_id)`` numpy arrays, post-NMS."""
+        try:
+            results = self.model.predict(
+                images,
+                imgsz=self.imgsz,
+                conf=self.conf,
+                iou=self.iou,
+                max_det=self.max_det,
+                device=self.device,
+                verbose=False,
+            )
+        except Exception as exc:
+            raise InferenceError(f"model.predict raised: {exc}") from exc
+        # Ultralytics returns torch tensors on the inference device;
+        # move to CPU + numpy for downstream visualization / JSON.
+        return [
+            (r.boxes.xyxy.cpu().numpy().reshape(-1, 4),
+             r.boxes.conf.cpu().numpy(),
+             r.boxes.cls.cpu().numpy().astype(int))
+            for r in results
+        ]
+
+
+class RFDETRDetector(_Detector):
+    """Frame-in / detections-out wrapper around Roboflow's ``rfdetr``.
+
+    RF-DETR is NMS-free: the decoder emits ``num_queries`` candidate boxes
+    per image and ``conf_threshold`` is the only filter. ``iou_threshold``
+    is therefore unused for a single pass — it only drives the tile-merge
+    NMS in :meth:`_Detector._tiled`, exactly as for YOLOv9.
+
+    ``weights_path`` may point at a fine-tuned ``checkpoint_best_ema.pth``
+    (see ``training/train_rfdetr.py``). When the file is missing the
+    COCO-pretrained ``variant`` is loaded instead, so "reset to base" and
+    a fresh install both work without a local file.
+    """
+
+    algorithm = "rfdetr"
+
+    def __init__(
+        self,
+        weights_path: Optional[str],
+        variant: str = "medium",
+        resolution: int = 640,
+        num_queries: int = 1200,
+        device: str = "auto",
+        conf_threshold: float = 0.25,
+        iou_threshold: float = 0.45,
+        class_names: Optional[Sequence[str]] = None,
+        warmup: bool = True,
+    ):
+        try:
+            import rfdetr  # heavy import — keep inside __init__
+        except ImportError as exc:
+            raise InferenceError(
+                "rfdetr is not installed. Run: pip install -r requirements.txt"
+            ) from exc
+
+        variant = str(variant).strip().lower()
+        if variant not in RFDETR_VARIANTS:
+            raise InferenceError(
+                f"Unknown RF-DETR variant {variant!r}; choose one of {RFDETR_VARIANTS}."
+            )
+        model_cls = getattr(rfdetr, f"RFDETR{variant.capitalize()}")
+
+        self.device = _resolve_device(device)
+        self.imgsz = int(resolution)
+        self.conf = float(conf_threshold)
+        self.iou = float(iou_threshold)
+        self.max_det = int(num_queries)
+
+        kwargs = dict(
+            resolution=self.imgsz,
+            num_queries=self.max_det,
+            num_select=self.max_det,
+            device=self.device,
+        )
+        weights = Path(weights_path) if weights_path else None
+        if weights is not None and weights.is_file():
+            kwargs["pretrain_weights"] = str(weights)
+            source = str(weights)
+        else:
+            source = f"COCO-pretrained rf-detr-{variant}"
+            log.info("No RF-DETR weights at %s — loading %s.", weights, source)
+
+        try:
+            self.model = model_cls(**kwargs)
+        except Exception as exc:
+            raise InferenceError(
+                f"Failed to load RF-DETR ({source}): {exc}"
+            ) from exc
+
+        model_names = getattr(self.model, "class_names", None)
+        if class_names:
+            self.class_names: List[str] = list(class_names)
+        elif model_names:
+            self.class_names = list(model_names)
+        else:
+            self.class_names = ["object"]
+
+        log.info(
+            "Detector ready: weights=%s backend=rfdetr-%s device=%s "
+            "resolution=%d queries=%d conf=%.2f classes=%s",
+            source, variant, self.device, self.imgsz, self.max_det, self.conf,
+            self.class_names,
+        )
+
+        if warmup:
+            self._warmup()
+
+    def _raw(self, images: List[np.ndarray]) -> RawBatch:
+        """Per image: ``(xyxy, conf, class_id)`` numpy arrays. No NMS."""
+        # rfdetr expects RGB; the rest of the app speaks BGR (cv2).
+        rgb = [np.ascontiguousarray(img[:, :, ::-1]) for img in images]
+        try:
+            dets = self.model.predict(rgb, threshold=self.conf, include_source_image=False)
+        except Exception as exc:
+            raise InferenceError(f"rfdetr predict raised: {exc}") from exc
+        if not isinstance(dets, (list, tuple)):
+            dets = [dets]
+        out: RawBatch = []
+        for d in dets:
+            xyxy = np.asarray(d.xyxy, dtype=np.float32).reshape(-1, 4)
+            n = len(xyxy)
+            conf = (np.asarray(d.confidence, dtype=np.float32)
+                    if d.confidence is not None else np.ones(n, dtype=np.float32))
+            cls = (np.asarray(d.class_id).astype(int)
+                   if d.class_id is not None else np.zeros(n, dtype=int))
+            out.append((xyxy, conf, cls))
+        return out
+
+
+def build_detector(algorithm: str, cfg, class_names: Optional[Sequence[str]] = None,
+                   weights_path: Optional[str] = None, **overrides) -> _Detector:
+    """Construct a detector for ``algorithm`` from an :class:`src.config.AppConfig`.
+
+    ``weights_path`` overrides the configured path (used for hot-swaps and
+    resets); ``overrides`` go straight to the constructor.
+    """
+    algorithm = str(algorithm).strip().lower()
+    if algorithm == "yolov9":
+        kw = dict(
+            weights_path=weights_path or cfg.model.weights,
+            device=cfg.model.device,
+            imgsz=cfg.model.imgsz,
+            conf_threshold=cfg.model.conf_threshold,
+            iou_threshold=cfg.model.iou_threshold,
+            class_names=class_names,
+        )
+        kw.update(overrides)
+        return YOLOv9Detector(**kw)
+    if algorithm == "rfdetr":
+        kw = dict(
+            weights_path=weights_path if weights_path is not None else cfg.rfdetr.weights,
+            variant=cfg.rfdetr.variant,
+            resolution=cfg.rfdetr.resolution,
+            num_queries=cfg.rfdetr.num_queries,
+            device=cfg.model.device,
+            conf_threshold=cfg.model.conf_threshold,
+            iou_threshold=cfg.model.iou_threshold,
+            class_names=class_names,
+        )
+        kw.update(overrides)
+        return RFDETRDetector(**kw)
+    raise InferenceError(f"Unknown algorithm {algorithm!r}; choose one of {ALGORITHMS}.")

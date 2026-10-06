@@ -22,6 +22,8 @@ import {
 import type { SeedFromPredictionState } from './UploadView'
 import LabelCanvas from './LabelCanvas'
 import TrainPanel from './TrainPanel'
+import AlgorithmToggle from './AlgorithmToggle'
+import { useAlgorithm } from './useAlgorithm'
 
 type SourceMode = 'upload' | 'snapshot'
 
@@ -71,6 +73,8 @@ export default function LabelView() {
   // identity, which survives the filter/list mapping below.
   const [suggested, setSuggested] = useState<Set<LabelBox>>(new Set())
   const [suggestConf, setSuggestConf] = useState(0.25)
+  // Which detector answers "Suggest missing".
+  const [algorithm, setAlgorithm] = useAlgorithm()
 
   // ---- IO state -----------------------------------------------------------
   const [busy, setBusy] = useState(false)
@@ -325,7 +329,7 @@ export default function LabelView() {
       // trained on (stream captures arrive already CLAHE-enhanced), so the
       // model must see them as-is. Enhancing again cost ~20 points of recall.
       const res = await predict(
-        new File([imageBlob], imageName ?? 'image.png'), { preprocess: false },
+        new File([imageBlob], imageName ?? 'image.png'), { preprocess: false, algorithm },
       )
       const candidates = detectionsToLabelBoxes(
         res.detections.filter((d) => d.confidence >= suggestConf),
@@ -343,7 +347,7 @@ export default function LabelView() {
     } finally {
       setBusy(false)
     }
-  }, [imageBlob, imageName, boxes, suggestConf])
+  }, [imageBlob, imageName, boxes, suggestConf, algorithm])
 
   const onClearImage = useCallback(() => {
     if (imageUrl) URL.revokeObjectURL(imageUrl)
@@ -403,6 +407,7 @@ export default function LabelView() {
             onClick={() => setSourceMode('snapshot')}
           >Snapshot</button>
         </div>
+        <AlgorithmToggle value={algorithm} onChange={setAlgorithm} disabled={busy} />
 
         {sourceMode === 'upload' ? (
           <input

@@ -94,7 +94,7 @@ export default function TrainingConsole({ status, onClose, onStopped }: Props) {
           ) : (
             <span className="muted small">
               {status.state === 'completed'
-                ? `Run completed (rc=${status.return_code}). Best weights at runs/train/${status.name}/weights/best.pt.`
+                ? `Run completed (rc=${status.return_code}). Best weights at runs/train/${status.name}/${status.algorithm === 'rfdetr' ? 'checkpoint_best_ema.pth' : 'weights/best.pt'} (auto-activated).`
                 : status.state === 'failed'
                   ? `Run failed (rc=${status.return_code}). Scroll up for the traceback.`
                   : status.state === 'killed'

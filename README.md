@@ -176,13 +176,44 @@ on a Raspberry Pi (one systemd unit, one port, no nginx).
 
 | Method | Path | Notes |
 |---|---|---|
-| `GET` | `/api/health` | Returns `{status, model_loaded, device, classes}`. |
-| `POST` | `/api/predict` | `multipart/form-data` with `file=<image>` → JSON detections + image size + inference_ms. |
-| `GET` | `/api/stream` | `multipart/x-mixed-replace` MJPEG stream. Query: `source` (int or path), `annotate` (default `true`). |
+| `GET` | `/api/health` | Returns `{status, model_loaded, device, classes, algorithm, algorithms}` — `algorithms` lists both detectors with `available / loaded / weights_exists`. |
+| `POST` | `/api/predict` | `multipart/form-data` with `file=<image>` → JSON detections + image size + inference_ms + `algorithm`. Query: `algorithm=yolov9|rfdetr` (default from config). |
+| `GET` | `/api/stream` | `multipart/x-mixed-replace` MJPEG stream. Query: `source` (int or path), `annotate` (default `true`), `algorithm`. |
+| `POST` | `/api/train` | JSON `{algorithm, weights, epochs, batch, imgsz, device}` — spawns `training/train.py` or `training/train_rfdetr.py`; the best checkpoint is auto-activated. |
+| `POST` | `/api/model/reset` | Query `algorithm`. Moves that detector's fine-tuned weights to a `.bak` and reloads its COCO base. |
 
 The `source` query param accepts the same values as `capture.source` in
 `config.yaml` — an integer device index, a file path, or an
 `rtsp://` URL.
+
+## Two detectors: YOLOv9 and RF-DETR
+
+The app serves two interchangeable detectors behind one API:
+
+| | YOLOv9-c (default) | RF-DETR |
+|---|---|---|
+| library | `ultralytics` | `rfdetr` (DINOv2 backbone + DETR decoder, **no NMS**) |
+| wrapper | `src.inference.YOLOv9Detector` | `src.inference.RFDETRDetector` |
+| fine-tuned weights | `models/best_yolov9c.pt` | `models/best_rfdetr.pth` (not git-tracked: >100 MB) |
+| without a fine-tuned file | needs `models/yolov9c.pt` | downloads the COCO-pretrained variant (~390 MB, cached in `~/.roboflow/models`) |
+| training entry point | `training/train.py` | `training/train_rfdetr.py` (same CLI flags) |
+
+Every detection page (Upload, Live, Label → "Suggest missing") has a
+YOLOv9 / RF-DETR toggle; the choice is remembered in the browser. The Train
+tab has an **Algorithm** selector; a finished run's best checkpoint is
+copied over the active weights of *that* algorithm and hot-loaded (the
+previous file is kept as `.bak-<timestamp>`). `model.algorithm` in
+`config.yaml` only sets the default for callers that don't pass
+`?algorithm=`. RF-DETR loads lazily on first use, so a YOLO-only install
+never pays for it.
+
+Both wrappers share the tiling logic for large slides (`_Detector` in
+`src/inference.py`); the only RF-DETR-specific knobs are in the `rfdetr:`
+block of `config.yaml` (`variant`, `resolution`, `num_queries` = max
+detections per image — dense slides exceed the library default of 300).
+
+The two models are compared under one evaluation in
+`experiments/rfdetr_vs_yolov9/` (`scripts/compare_*.py`).
 
 ## Training on your own E. coli dataset
 
@@ -250,6 +281,18 @@ Notes:
 - Training output lands in `runs/train/ecoli_yolov9c/`. Best checkpoint
   is `weights/best.pt`.
 
+RF-DETR uses the same dataset yaml and flags:
+
+```bash
+python -m training.train_rfdetr --data training/dataset.yaml --weights medium \
+    --epochs 200 --batch 4 --imgsz 640 --device 0 --name ecoli_rfdetr
+```
+
+`--weights` is a variant name (`nano | small | medium | large`, COCO-pretrained)
+or a `.pth` to continue from. The best checkpoint is
+`runs/train/ecoli_rfdetr/checkpoint_best_ema.pth`; copy it to
+`models/best_rfdetr.pth` (the Train tab does this automatically).
+
 ### 4. Use your trained weights
 
 ```bash
@@ -278,7 +321,12 @@ no code changes needed; `YOLOv9Detector` loads both transparently.
 | `model.device` | str | `auto` \| `cuda` \| `cuda:0` \| `cpu`. |
 | `model.imgsz` | int | Inference size. Multiple of 32. Lower = faster, lower mAP. |
 | `model.conf_threshold` | float | Minimum confidence to emit a detection. |
-| `model.iou_threshold` | float | NMS IoU threshold. |
+| `model.iou_threshold` | float | NMS IoU threshold (YOLOv9; for RF-DETR only the tile-merge NMS). |
+| `model.algorithm` | str | Default detector: `yolov9` \| `rfdetr`. Both stay selectable per request. |
+| `rfdetr.weights` | str | Fine-tuned RF-DETR checkpoint; COCO base is served if missing. |
+| `rfdetr.variant` | str | `nano` \| `small` \| `medium` \| `large`. |
+| `rfdetr.resolution` | int | Square input size, multiple of 32; must match training. |
+| `rfdetr.num_queries` | int | Max detections per image (decoder queries). |
 | `capture.source` | int / str | Device index, file path, or stream URL. |
 | `capture.{width,height,fps}` | int | Requested capture parameters. Camera may ignore unsupported values. |
 | `preprocessing.apply_clahe` | bool | Apply CLAHE before inference. |
