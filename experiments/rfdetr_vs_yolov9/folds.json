@@ -1,0 +1,990 @@
+{
+ "seed": 0,
+ "folds": 5,
+ "inner_val": 6,
+ "dup_threshold": 4.0,
+ "n_images": 69,
+ "n_boxes": 5585,
+ "categories": {
+  "0": "ecoli",
+  "1": "ecoli_cluster"
+ },
+ "fold_sizes": [
+  {
+   "test": 15,
+   "valid": 6,
+   "train": 48
+  },
+  {
+   "test": 14,
+   "valid": 6,
+   "train": 49
+  },
+  {
+   "test": 14,
+   "valid": 6,
+   "train": 49
+  },
+  {
+   "test": 13,
+   "valid": 6,
+   "train": 50
+  },
+  {
+   "test": 13,
+   "valid": 6,
+   "train": 50
+  }
+ ],
+ "dup_groups": [],
+ "dup_pairs": [
+  {
+   "a": "MicroscopeCapture(2).png",
+   "b": "MicroscopeCapture(42).png",
+   "score": 7.09
+  },
+  {
+   "a": "MicroscopeCapture(35).png",
+   "b": "MicroscopeCapture(40).png",
+   "score": 5.65
+  },
+  {
+   "a": "MicroscopeCapture(35).png",
+   "b": "MicroscopeCapture(44).png",
+   "score": 6.96
+  },
+  {
+   "a": "MicroscopeCapture(36).png",
+   "b": "MicroscopeCapture(37).png",
+   "score": 7.3
+  },
+  {
+   "a": "MicroscopeCapture(36).png",
+   "b": "MicroscopeCapture(39).png",
+   "score": 6.08
+  },
+  {
+   "a": "MicroscopeCapture(36).png",
+   "b": "MicroscopeCapture(41).png",
+   "score": 7.01
+  },
+  {
+   "a": "MicroscopeCapture(37).png",
+   "b": "MicroscopeCapture(39).png",
+   "score": 7.76
+  },
+  {
+   "a": "MicroscopeCapture(37).png",
+   "b": "MicroscopeCapture(41).png",
+   "score": 6.98
+  },
+  {
+   "a": "MicroscopeCapture(39).png",
+   "b": "MicroscopeCapture(41).png",
+   "score": 6.68
+  },
+  {
+   "a": "MicroscopeCapture(39).png",
+   "b": "MicroscopeCapture(44).png",
+   "score": 7.97
+  },
+  {
+   "a": "MicroscopeCapture(4).png",
+   "b": "MicroscopeCapture(42).png",
+   "score": 7.27
+  },
+  {
+   "a": "MicroscopeCapture(40).png",
+   "b": "MicroscopeCapture(44).png",
+   "score": 7.29
+  },
+  {
+   "a": "MicroscopeCapture(5).png",
+   "b": "image_2026-09-26_183914758.png",
+   "score": 6.66
+  }
+ ],
+ "images": [
+  {
+   "id": 1,
+   "file_name": "MicroscopeCapture(1).png",
+   "width": 640,
+   "height": 480,
+   "fold": 4,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 16,
+   "label_sha256": "95fc0d50f6459533fc034c9f0ed8c43b54d8a41ca97347f93463568e3ccdaaad"
+  },
+  {
+   "id": 2,
+   "file_name": "MicroscopeCapture(10).png",
+   "width": 640,
+   "height": 480,
+   "fold": 0,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 15,
+   "label_sha256": "ae1bb083830d8a1f73d9a7801a020617339720de514150feb24e729863f02433"
+  },
+  {
+   "id": 3,
+   "file_name": "MicroscopeCapture(11).png",
+   "width": 640,
+   "height": 480,
+   "fold": 1,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 13,
+   "label_sha256": "9003e798b08eb31aa6ae2a65408eaff775c1b030086abfd9bdd1508f3369ad5b"
+  },
+  {
+   "id": 4,
+   "file_name": "MicroscopeCapture(12).png",
+   "width": 640,
+   "height": 480,
+   "fold": 4,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [
+    0,
+    2
+   ],
+   "n_boxes": 22,
+   "label_sha256": "d353e6b64432aca940af4dcc0659a2e8c650a4e150385a6b028b3cf418d64090"
+  },
+  {
+   "id": 5,
+   "file_name": "MicroscopeCapture(13).png",
+   "width": 640,
+   "height": 480,
+   "fold": 1,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 23,
+   "label_sha256": "3264dabfd6d4ecc24adbdb08bf759dd098ec60bdb78b953eb0f72153d7e55b58"
+  },
+  {
+   "id": 6,
+   "file_name": "MicroscopeCapture(14) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 3,
+   "domain": "microscope",
+   "origin_split": "val",
+   "inner_val_of": [
+    2
+   ],
+   "n_boxes": 42,
+   "label_sha256": "f4582757306067462fff54d954371eef567c434ee3c6fd03e619e10a0595c060"
+  },
+  {
+   "id": 7,
+   "file_name": "MicroscopeCapture(16).png",
+   "width": 640,
+   "height": 480,
+   "fold": 2,
+   "domain": "microscope",
+   "origin_split": "val",
+   "inner_val_of": [
+    1
+   ],
+   "n_boxes": 23,
+   "label_sha256": "a76ffe91a79b24e08c4d072411b750c32fbf8b8228b04258471ff6b5630baaed"
+  },
+  {
+   "id": 8,
+   "file_name": "MicroscopeCapture(17).png",
+   "width": 640,
+   "height": 480,
+   "fold": 2,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 21,
+   "label_sha256": "48eeda5a4e974bd5162c26d147e1d71d660e0f7dab3cd06ac0ac0bab852f22ca"
+  },
+  {
+   "id": 9,
+   "file_name": "MicroscopeCapture(18) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 0,
+   "domain": "microscope",
+   "origin_split": "val",
+   "inner_val_of": [
+    4
+   ],
+   "n_boxes": 22,
+   "label_sha256": "8e7c3e136b4adcceb80ddfd94e25c0ce711e0cd6ccc69c4f431800feb224a424"
+  },
+  {
+   "id": 10,
+   "file_name": "MicroscopeCapture(19).png",
+   "width": 640,
+   "height": 480,
+   "fold": 4,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 19,
+   "label_sha256": "ed80d4420b9ea1bf51242eac6b49a3f818b07819dddef856a091a12eda6387b4"
+  },
+  {
+   "id": 11,
+   "file_name": "MicroscopeCapture(2).png",
+   "width": 640,
+   "height": 480,
+   "fold": 2,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [
+    1
+   ],
+   "n_boxes": 20,
+   "label_sha256": "71949e760838722074871b2efad27cc56be2864f89aae72a99912e08d53424b6"
+  },
+  {
+   "id": 12,
+   "file_name": "MicroscopeCapture(20).png",
+   "width": 640,
+   "height": 480,
+   "fold": 3,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 22,
+   "label_sha256": "20ce7335aa400555666afe215ca04e109ff02536f8ca035fa2e17d1431b98293"
+  },
+  {
+   "id": 13,
+   "file_name": "MicroscopeCapture(21).png",
+   "width": 640,
+   "height": 480,
+   "fold": 3,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 26,
+   "label_sha256": "cd7e8a9ad6f39994200500c839b0e29b087699537e525d9f0ab7e34607609268"
+  },
+  {
+   "id": 14,
+   "file_name": "MicroscopeCapture(23) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 2,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 35,
+   "label_sha256": "09ff7fc1df23c9f9efd3469818a206b2d4782952bae6fffd9eaef0cfeabc3c72"
+  },
+  {
+   "id": 15,
+   "file_name": "MicroscopeCapture(24) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 1,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 34,
+   "label_sha256": "1f3072c68e1850c803d58caee25d5e8c53d81a405a6d7c6eaab9eeec4d49eb1a"
+  },
+  {
+   "id": 16,
+   "file_name": "MicroscopeCapture(25) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 1,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 47,
+   "label_sha256": "0599a11f4d4c071d2625b7f18939263d4fb7b71f0ede4a242576247380cf4a7c"
+  },
+  {
+   "id": 17,
+   "file_name": "MicroscopeCapture(26).png",
+   "width": 640,
+   "height": 480,
+   "fold": 0,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 32,
+   "label_sha256": "7f3150d9d7bcb9b60a333538dee2680f83547308db463be53dc12af25c38a0dd"
+  },
+  {
+   "id": 18,
+   "file_name": "MicroscopeCapture(28).png",
+   "width": 640,
+   "height": 480,
+   "fold": 0,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 25,
+   "label_sha256": "6caab341079152136b1e4423123031ee3716de02981cb398bdbc7c82fe32cda8"
+  },
+  {
+   "id": 19,
+   "file_name": "MicroscopeCapture(29) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 4,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [
+    3
+   ],
+   "n_boxes": 33,
+   "label_sha256": "eaed3de3f30ebbfb10eb03208357157a7d28251bc70e0ed2f5bad8db43c57fa9"
+  },
+  {
+   "id": 20,
+   "file_name": "MicroscopeCapture(3).png",
+   "width": 640,
+   "height": 480,
+   "fold": 1,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [
+    4
+   ],
+   "n_boxes": 20,
+   "label_sha256": "919069fb6f376638f3ff029d82674335a7808c1d7cd2ccfb3bbc04fd380a0cf6"
+  },
+  {
+   "id": 21,
+   "file_name": "MicroscopeCapture(30) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 4,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 28,
+   "label_sha256": "ab6ef5c86d3525f8299becaf60ffaaefb7499d8a0902fcf10fe88c691648ffdb"
+  },
+  {
+   "id": 22,
+   "file_name": "MicroscopeCapture(31) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 3,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 49,
+   "label_sha256": "9a879a75b8b950989f4ffa591373835773b508735d38367dfb80651ff4dc88d3"
+  },
+  {
+   "id": 23,
+   "file_name": "MicroscopeCapture(32).png",
+   "width": 640,
+   "height": 480,
+   "fold": 4,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 20,
+   "label_sha256": "5066f61f7675b168408c3ebe4a98cd500f30a6dcc20da276bb040da7f454c41f"
+  },
+  {
+   "id": 24,
+   "file_name": "MicroscopeCapture(33) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 3,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 32,
+   "label_sha256": "5ea079fcab49cf7a00b504e54f1b790e96fa44e899a0514c5159cc5a5fe11c4e"
+  },
+  {
+   "id": 25,
+   "file_name": "MicroscopeCapture(34) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 4,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 119,
+   "label_sha256": "be02a7fca0fa9bb22620a6a8bdfe68e544c1c24ba8cf75128f721d6b890b980d"
+  },
+  {
+   "id": 26,
+   "file_name": "MicroscopeCapture(35).png",
+   "width": 640,
+   "height": 480,
+   "fold": 2,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 11,
+   "label_sha256": "0fa6311d477bdfa5e08505cd201a262d978d1001104db45144a5d85aa6f8883e"
+  },
+  {
+   "id": 27,
+   "file_name": "MicroscopeCapture(36).png",
+   "width": 640,
+   "height": 480,
+   "fold": 2,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [
+    4
+   ],
+   "n_boxes": 26,
+   "label_sha256": "93b3d89c4ba34286e65287d3be14952fa8891887d4d307cdb9210965c3b6de9e"
+  },
+  {
+   "id": 28,
+   "file_name": "MicroscopeCapture(37).png",
+   "width": 640,
+   "height": 480,
+   "fold": 4,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 32,
+   "label_sha256": "371b9c075567c01e479cc53d9f07e08b3ef9ec39e7fd7b656518eddbe9963e41"
+  },
+  {
+   "id": 29,
+   "file_name": "MicroscopeCapture(39).png",
+   "width": 640,
+   "height": 480,
+   "fold": 0,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 25,
+   "label_sha256": "5e0bb9d7f9174306a9663a2369689b508bccedf7596bb0f6fa0650a7be67a4e9"
+  },
+  {
+   "id": 30,
+   "file_name": "MicroscopeCapture(4).png",
+   "width": 640,
+   "height": 480,
+   "fold": 1,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [
+    0
+   ],
+   "n_boxes": 20,
+   "label_sha256": "82c8ef5cc7b67117ee5ba8f8b81c57f360d640688a124818a9a067658d0fae85"
+  },
+  {
+   "id": 31,
+   "file_name": "MicroscopeCapture(40).png",
+   "width": 640,
+   "height": 480,
+   "fold": 0,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 31,
+   "label_sha256": "40d6e342b48e3a035bc630f81595aff8288f6c092040cc2e52d8e7e2a131fd80"
+  },
+  {
+   "id": 32,
+   "file_name": "MicroscopeCapture(41).png",
+   "width": 640,
+   "height": 480,
+   "fold": 3,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 24,
+   "label_sha256": "f21a7f6dcc249bcf387cddb923502945b8d7197a61679cb2be840a8b3f49cd1e"
+  },
+  {
+   "id": 33,
+   "file_name": "MicroscopeCapture(42).png",
+   "width": 640,
+   "height": 480,
+   "fold": 4,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [
+    0
+   ],
+   "n_boxes": 26,
+   "label_sha256": "c15da01804b247b4b0991ab1f75c9f51abf1d86916cc13849fb0f6efc5bfa0e9"
+  },
+  {
+   "id": 34,
+   "file_name": "MicroscopeCapture(44).png",
+   "width": 640,
+   "height": 480,
+   "fold": 0,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 29,
+   "label_sha256": "15d1ee5cc2ed4c5041da84435da467394b033a7f0c177a1b58513fb3256e097b"
+  },
+  {
+   "id": 35,
+   "file_name": "MicroscopeCapture(45) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 0,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 34,
+   "label_sha256": "79be520f1e05658ee8d6e2cc18095cc277454f18d14f9c7ec88be92255b894a8"
+  },
+  {
+   "id": 36,
+   "file_name": "MicroscopeCapture(46) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 1,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 48,
+   "label_sha256": "ccdbb559931cc89c42ae2d875ad0b4af601eb33f283638374cd5490bd0666b1a"
+  },
+  {
+   "id": 37,
+   "file_name": "MicroscopeCapture(47) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 1,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 49,
+   "label_sha256": "485c4f2fdd52a46da210002c14372ececaf3f17679603dbb7b08e54ddbcf5653"
+  },
+  {
+   "id": 38,
+   "file_name": "MicroscopeCapture(48).png",
+   "width": 640,
+   "height": 480,
+   "fold": 3,
+   "domain": "microscope",
+   "origin_split": "val",
+   "inner_val_of": [],
+   "n_boxes": 51,
+   "label_sha256": "a664a4c5935aeeaa434b061fc6a59065ac3666419eeb9f6ba7ea7ac338940497"
+  },
+  {
+   "id": 39,
+   "file_name": "MicroscopeCapture(49) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 0,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 39,
+   "label_sha256": "aa35542d958597afb4ad0aa93cc223a58da2fd3e59f23aa661b423ac5f33f8b6"
+  },
+  {
+   "id": 40,
+   "file_name": "MicroscopeCapture(5).png",
+   "width": 640,
+   "height": 480,
+   "fold": 2,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 25,
+   "label_sha256": "e9b65b055b9f389b092eefb04d4111a08e365c8a96b1acc7cc5049399b91a5e1"
+  },
+  {
+   "id": 41,
+   "file_name": "MicroscopeCapture(50).png",
+   "width": 640,
+   "height": 480,
+   "fold": 3,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 54,
+   "label_sha256": "0b082b673cf35bc8f01cdc7b2bc98fd143cd552cf732c78c9367b0d67899c8a0"
+  },
+  {
+   "id": 42,
+   "file_name": "MicroscopeCapture(53) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 4,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 158,
+   "label_sha256": "13f2696e231cefc15afbe386215a3315862f66391fb0e6f3f847f53da1239808"
+  },
+  {
+   "id": 43,
+   "file_name": "MicroscopeCapture(54) - 2.png",
+   "width": 640,
+   "height": 480,
+   "fold": 2,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [
+    3
+   ],
+   "n_boxes": 145,
+   "label_sha256": "9700c7f79703be7d60bd8890619abdcab4bc7b159c5cf4e6b71564c0e18ef9ce"
+  },
+  {
+   "id": 44,
+   "file_name": "MicroscopeCapture(55) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 2,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 189,
+   "label_sha256": "7f4726153ddd682fb4a79c161cb152dec328f4a69e201978214460d8b6f8cbac"
+  },
+  {
+   "id": 45,
+   "file_name": "MicroscopeCapture(56) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 1,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 49,
+   "label_sha256": "55e58383d1e49e528a03c62ce59db79030cc5003d273b57ba9620dedf326c481"
+  },
+  {
+   "id": 46,
+   "file_name": "MicroscopeCapture(57) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 4,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [
+    1,
+    3
+   ],
+   "n_boxes": 140,
+   "label_sha256": "4cdd1584090957303b96e38a307dc112843378b962718e8d57cc212b1a37cafb"
+  },
+  {
+   "id": 47,
+   "file_name": "MicroscopeCapture(58).png",
+   "width": 640,
+   "height": 480,
+   "fold": 3,
+   "domain": "microscope",
+   "origin_split": "val",
+   "inner_val_of": [],
+   "n_boxes": 98,
+   "label_sha256": "1a86138f9a1e68283da8b34795bb4e0275a754c3d882e14cd79b61ea100cd81f"
+  },
+  {
+   "id": 48,
+   "file_name": "MicroscopeCapture(59) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 3,
+   "domain": "microscope",
+   "origin_split": "val",
+   "inner_val_of": [],
+   "n_boxes": 233,
+   "label_sha256": "2c2a68923e1b2f1acde355068f3702f3bf872b8ed93d72ba73dd406a023e5e36"
+  },
+  {
+   "id": 49,
+   "file_name": "MicroscopeCapture(6) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 3,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 29,
+   "label_sha256": "7e0e8c744245772b08a955e6534a968519faa2acc7e0c0abcb2085442a52ea75"
+  },
+  {
+   "id": 50,
+   "file_name": "MicroscopeCapture(60) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 1,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 30,
+   "label_sha256": "f523efc541f70362c1add952b77050ac8bfaff84cf0bd2a8545c5cff2164201b"
+  },
+  {
+   "id": 51,
+   "file_name": "MicroscopeCapture(61) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 1,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 112,
+   "label_sha256": "5bcf42711dc1fd6f2292f782133f69fda09b2b66424426458f92bd2593a77685"
+  },
+  {
+   "id": 52,
+   "file_name": "MicroscopeCapture(62) - 1.png",
+   "width": 640,
+   "height": 480,
+   "fold": 0,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 61,
+   "label_sha256": "b05e829b3266304b5108e1b02b7a21b6370dcf079861dcdbc2e9b2252509612f"
+  },
+  {
+   "id": 53,
+   "file_name": "MicroscopeCapture(63).png",
+   "width": 640,
+   "height": 480,
+   "fold": 2,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 71,
+   "label_sha256": "474209c8d5b0f4b30024b7070d659e36137f3b537e13f3c4ca1a10734e8b6da1"
+  },
+  {
+   "id": 54,
+   "file_name": "MicroscopeCapture(7).png",
+   "width": 640,
+   "height": 480,
+   "fold": 0,
+   "domain": "microscope",
+   "origin_split": "val",
+   "inner_val_of": [
+    2
+   ],
+   "n_boxes": 103,
+   "label_sha256": "f61810f036e50ab3ffaae17fe7e82ac0b02d367844ef53e12016349aba20b0e9"
+  },
+  {
+   "id": 55,
+   "file_name": "MicroscopeCapture(8).png",
+   "width": 640,
+   "height": 480,
+   "fold": 0,
+   "domain": "microscope",
+   "origin_split": "val",
+   "inner_val_of": [],
+   "n_boxes": 14,
+   "label_sha256": "7fa4fa184b67600786307635232cf46f523c82a1f8e79518583e15b7e10cd15c"
+  },
+  {
+   "id": 56,
+   "file_name": "MicroscopeCapture(9).png",
+   "width": 640,
+   "height": 480,
+   "fold": 2,
+   "domain": "microscope",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 11,
+   "label_sha256": "7987dda77e0a4390ef10bb82cd44507a8d54291dbcf5b685db3ca36893e7b3a7"
+  },
+  {
+   "id": 57,
+   "file_name": "ecoli - 1.png",
+   "width": 2000,
+   "height": 1693,
+   "fold": 1,
+   "domain": "stained",
+   "origin_split": "val",
+   "inner_val_of": [
+    0,
+    4
+   ],
+   "n_boxes": 1043,
+   "label_sha256": "afe62d6cd7ab965252e7681bf6d4e2dc7101d4e2674b1dba68b88034b80cc653"
+  },
+  {
+   "id": 58,
+   "file_name": "ecoli2 - 1 - 1.png",
+   "width": 704,
+   "height": 482,
+   "fold": 1,
+   "domain": "stained",
+   "origin_split": "train",
+   "inner_val_of": [
+    0,
+    3
+   ],
+   "n_boxes": 267,
+   "label_sha256": "2c65a90950ff0af317c479a347430f0d7d72a80b69cb6cef9b5091a0190b6d1c"
+  },
+  {
+   "id": 59,
+   "file_name": "ecoli3 - 1.png",
+   "width": 432,
+   "height": 324,
+   "fold": 3,
+   "domain": "stained",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 34,
+   "label_sha256": "0f62021618dbfde51fdabf60e46e4302a7193731e7092c65e741ecb0f290dfca"
+  },
+  {
+   "id": 60,
+   "file_name": "ecoli4 - 1.png",
+   "width": 780,
+   "height": 438,
+   "fold": 2,
+   "domain": "stained",
+   "origin_split": "train",
+   "inner_val_of": [
+    3
+   ],
+   "n_boxes": 146,
+   "label_sha256": "ff1f35a58a7b326065457537956852e94d899560e8ef1f03c524d1dfb0631bbb"
+  },
+  {
+   "id": 61,
+   "file_name": "ecoli5.png",
+   "width": 800,
+   "height": 450,
+   "fold": 0,
+   "domain": "stained",
+   "origin_split": "train",
+   "inner_val_of": [
+    4
+   ],
+   "n_boxes": 126,
+   "label_sha256": "2d3829a5116284f82e3cf3478a6515a51bfb7af6077be0210582ee4222c4bcb1"
+  },
+  {
+   "id": 62,
+   "file_name": "ecolitest1 - 1.png",
+   "width": 2000,
+   "height": 1500,
+   "fold": 2,
+   "domain": "stained",
+   "origin_split": "train",
+   "inner_val_of": [
+    1
+   ],
+   "n_boxes": 166,
+   "label_sha256": "74ffda1c56325989f49830389727d31627821d48e4e0e5e429676bdd755d6a39"
+  },
+  {
+   "id": 63,
+   "file_name": "ecolitest2 - 1.png",
+   "width": 848,
+   "height": 576,
+   "fold": 0,
+   "domain": "stained",
+   "origin_split": "train",
+   "inner_val_of": [
+    1,
+    3
+   ],
+   "n_boxes": 315,
+   "label_sha256": "418e4eb206ce66d9d284a4ec4e49b674d70928b7accf16b79724f84977dbd242"
+  },
+  {
+   "id": 64,
+   "file_name": "ecolitest4 - 1 - 1.png",
+   "width": 1000,
+   "height": 1000,
+   "fold": 2,
+   "domain": "stained",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 62,
+   "label_sha256": "76decacfffa4e2bf25250a900eaad4d5794dffa6d82aa7cce5bfff99601b28b7"
+  },
+  {
+   "id": 65,
+   "file_name": "image_2026-09-26_182949569.png",
+   "width": 1200,
+   "height": 896,
+   "fold": 4,
+   "domain": "stained",
+   "origin_split": "train",
+   "inner_val_of": [
+    0,
+    2
+   ],
+   "n_boxes": 343,
+   "label_sha256": "1c4bf81958a9e1efb5e36f0baa6dea03247dddc1657318bdd1a8873fa7746471"
+  },
+  {
+   "id": 66,
+   "file_name": "image_2026-09-26_183752391.png",
+   "width": 1200,
+   "height": 896,
+   "fold": 1,
+   "domain": "stained",
+   "origin_split": "train",
+   "inner_val_of": [],
+   "n_boxes": 198,
+   "label_sha256": "374644fae306fbe7c2a8e99dfa7022de5bcf8107a61d611406decdd95071f63b"
+  },
+  {
+   "id": 67,
+   "file_name": "image_2026-09-26_183914758.png",
+   "width": 1200,
+   "height": 896,
+   "fold": 4,
+   "domain": "stained",
+   "origin_split": "test",
+   "inner_val_of": [
+    1
+   ],
+   "n_boxes": 19,
+   "label_sha256": "c4c7577fc9aab187fc9b818931ef2a13cf7514b07351834951a54ad4f584cb3a"
+  },
+  {
+   "id": 68,
+   "file_name": "image_2026-09-26_184159253.png",
+   "width": 1024,
+   "height": 1024,
+   "fold": 3,
+   "domain": "stained",
+   "origin_split": "test",
+   "inner_val_of": [
+    2,
+    4
+   ],
+   "n_boxes": 34,
+   "label_sha256": "1ea24c9dbba37bb2c8e255463c7e3934124f83927a28a3445d5b88b3c94947ae"
+  },
+  {
+   "id": 69,
+   "file_name": "image_2026-09-26_184346855.png",
+   "width": 1376,
+   "height": 768,
+   "fold": 0,
+   "domain": "stained",
+   "origin_split": "train",
+   "inner_val_of": [
+    2
+   ],
+   "n_boxes": 107,
+   "label_sha256": "b4625bbd209b3f23e4efc170e1f43d6af9544b402c1c1ad6c97dafe6f3b04493"
+  }
+ ]
+}

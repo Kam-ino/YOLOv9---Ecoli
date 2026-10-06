@@ -56,6 +56,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--patience", type=int, default=30,
                    help="Early stopping patience in epochs without "
                         "validation improvement.")
+    p.add_argument("--save-period", type=int, default=10,
+                   help="Also keep a checkpoint every N epochs (-1 = off). "
+                        "Each yolov9c checkpoint is ~190 MB.")
     p.add_argument("--workers", type=int, default=4,
                    help="DataLoader worker count. Reduce on Windows / "
                         "low-RAM machines.")
@@ -65,6 +68,10 @@ def parse_args() -> argparse.Namespace:
                    choices=("SGD", "Adam", "AdamW", "auto"),
                    help="Optimizer. AdamW is a safer default on small "
                         "microscopy datasets.")
+    p.add_argument("--max-det", type=int, default=300,
+                   help="Max detections per image during validation (Ultralytics "
+                        "default 300 truncates dense slides; the comparison "
+                        "experiment uses 1200).")
     return p.parse_args()
 
 
@@ -147,7 +154,8 @@ def main() -> None:
         # Reporting / checkpoints
         plots=True,
         save=True,
-        save_period=10,
+        save_period=args.save_period,
+        max_det=args.max_det,
     )
 
     save_dir = Path(results.save_dir)
