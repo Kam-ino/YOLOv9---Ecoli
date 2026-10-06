@@ -212,6 +212,14 @@ Both wrappers share the tiling logic for large slides (`_Detector` in
 block of `config.yaml` (`variant`, `resolution`, `num_queries` = max
 detections per image — dense slides exceed the library default of 300).
 
+`data/ecoli` already contains the 8 orientations of every labelled image
+(`<name>__d4-<k>.png`, k = 0 original … 7, built by
+`scripts/make_pseudo_dataset.py` + `scripts/merge_expanded_into_data.py`),
+with YOLO pseudo-labels added where the human labels had gaps
+(`data/ecoli_x8/pseudo.json` lists them). `data/ecoli_human/` keeps the
+human-only labels of the originals for evaluation. Browse everything with
+`python scripts/make_gallery.py` → `runs/compare/gallery/index.html`.
+
 Both trainers accept `--expand8` (Train tab: **Expand ×8**): before training,
 every training image is written in its 8 rotations/mirrors with transformed
 labels under the run's dataset view; validation images are left as they are.

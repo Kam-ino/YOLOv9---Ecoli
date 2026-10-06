@@ -72,7 +72,8 @@ def main() -> None:
 
     # 1. Expand: 8 orientations with rotated human labels.
     t0 = time.time()
-    sources = {s: sorted(p for p in (a.src / "images" / s).glob("*") if p.suffix.lower() in IMG_EXTS)
+    sources = {s: sorted(p for p in (a.src / "images" / s).glob("*")
+                         if p.suffix.lower() in IMG_EXTS and D4_SUFFIX not in p.stem)   # originals only
                for s in ("train", "val", "test")}
     variants = []
     for split, imgs in sources.items():

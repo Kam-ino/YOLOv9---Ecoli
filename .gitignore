@@ -35,3 +35,5 @@ frontend/.vite/
 
 # Regenerable expanded + pseudo-labelled copy of data/ecoli (scripts/make_pseudo_dataset.py, ~250 MB)
 data/ecoli_x8/
+# Hard-linked copies of the originals; labels there are the frozen human-only ground truth (tracked)
+data/ecoli_human/images/

@@ -1,0 +1,8 @@
+path: C:/Users/U S E R - P C/Desktop/Claude-Obsidian/Claude1/GitHub/YOLOv9 - Ecoli/data/ecoli_human
+train: images/train
+val: images/val
+test: images/test
+names:
+  0: ecoli
+  1: ecoli_cluster
+note: human-only labels frozen by scripts/merge_expanded_into_data.py

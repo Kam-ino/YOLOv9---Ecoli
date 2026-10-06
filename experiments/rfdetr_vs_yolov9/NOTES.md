@@ -137,6 +137,18 @@ train + val, so its pseudo-labels on a fold's training images are not
 independent of that fold's held-out images; evaluation is still against
 human labels only.
 
+### Dataset folder after 2026-10-07 07:30 (`scripts/merge_expanded_into_data.py`)
+
+At Dominic's request the 552 expanded, pseudo-labelled images were merged
+into `data/ecoli` (train 464 / val 72 / test 16; originals' label files now
+also carry the teacher's boxes). The paper's ground truth is the frozen
+human-only copy `data/ecoli_human/` (69 originals, labels as of that
+morning); `scripts/compare_folds.py` defaults to it and ignores `__d4-`
+variants, so the fold plan, `gt_all.json` and `label_hashes.txt` are
+unchanged. The thesis `scripts/crossval.py` and the app's Train tab now see
+all 552 images — crossval.py would pool rotated copies across folds, so do
+not quote it for the paper.
+
 ### Known confounds (state in the paper)
 
 - Augmentation: YOLO's mosaic / rotation / HSV / erasing vs RF-DETR's scale

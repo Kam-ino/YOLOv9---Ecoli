@@ -39,7 +39,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from training.dataset_view import IMG_EXTS, label_of, make_view, names_of_yaml  # noqa: E402
+from training.dataset_view import D4_SUFFIX, IMG_EXTS, label_of, make_view, names_of_yaml  # noqa: E402
 
 # scripts/merge_duplicate_labels.py calibrates this metric as "<4 = same
 # frame, 15+ = different view". Distinct frames of the same microscope setup
@@ -128,7 +128,11 @@ def pick_inner_val(groups, exclude, n: int, seed: int):
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--data", type=Path, default=ROOT / "data" / "ecoli")
+    # Ground truth = human-only labels. data/ecoli itself carries pseudo-labels
+    # since scripts/merge_expanded_into_data.py; the frozen copy is authoritative.
+    ap.add_argument("--data", type=Path,
+                    default=(ROOT / "data" / "ecoli_human") if (ROOT / "data" / "ecoli_human").exists()
+                    else ROOT / "data" / "ecoli")
     ap.add_argument("--names", type=Path, default=ROOT / "training" / "dataset.yaml")
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--inner-val", type=int, default=6)
@@ -142,7 +146,7 @@ def main() -> None:
     names = names_of_yaml(a.names)
     images = sorted(
         (p for s in ("train", "val", "test") for p in (a.data / "images" / s).glob("*")
-         if p.suffix.lower() in IMG_EXTS),
+         if p.suffix.lower() in IMG_EXTS and D4_SUFFIX not in p.stem),     # never pool rotated copies
         key=lambda p: p.name,
     )
     assert len({p.name for p in images}) == len(images), "duplicate file names across splits"
