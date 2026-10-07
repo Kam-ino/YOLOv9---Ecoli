@@ -20,6 +20,12 @@ be edited while this runs. Expect roughly 12 minutes per fold on a laptop GPU.
 Usage (from the repo root):
     python scripts/crossval.py --tag baseline
     python scripts/crossval.py --tag smoke --folds 2 --epochs 2     # plumbing check
+
+Learning curve - how much does more data help? Re-run the baseline's exact
+folds on half of each training set, with the same number of training steps
+(half the images -> twice the epochs):
+    python scripts/crossval.py --tag half --folds-from runs/crossval/baseline \
+        --train-fraction 0.5 --epochs 500
 """
 import argparse
 import json
@@ -36,6 +42,24 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from scripts.merge_duplicate_labels import IMG_EXTS, _xyxy, domain_of, load_labels  # noqa: E402
+
+
+def label_of(img: Path) -> Path:
+    """<root>/images/<split>/x.png -> <root>/labels/<split>/x.txt"""
+    return img.parent.parent.parent / "labels" / img.parent.name / (img.stem + ".txt")
+
+
+def subsample(images, fraction: float, seed: int):
+    """Keep ``fraction`` of each image source. Nested: with the same seed, the
+    images kept at 0.25 are also among those kept at 0.5."""
+    if fraction >= 1.0:
+        return list(images)
+    kept = []
+    for dom in ("microscope", "stained"):
+        group = sorted((p for p in images if domain_of(p.name) == dom), key=lambda p: p.name)
+        random.Random(seed).shuffle(group)
+        kept += group[:max(1, round(len(group) * fraction))] if group else []
+    return kept
 
 
 def make_folds(images, k: int, seed: int):
@@ -88,6 +112,12 @@ def main() -> None:
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--folds-from", type=Path, default=None,
+                    help="Reuse the held-out folds and label snapshot of an earlier run "
+                         "(e.g. runs/crossval/baseline), so results pair fold by fold.")
+    ap.add_argument("--train-fraction", type=float, default=1.0,
+                    help="Train on this share of each fold's training images, per image "
+                         "source. For learning curves; raise --epochs to match steps.")
     a = ap.parse_args()
 
     out = ROOT / "runs" / "crossval" / a.tag
@@ -98,37 +128,50 @@ def main() -> None:
     import yaml
     names = yaml.safe_load((ROOT / "training" / "dataset.yaml").read_text(encoding="utf-8"))["names"]
 
-    images = [p for s in ("train", "val", "test") for p in (a.data / "images" / s).glob("*")
-              if p.suffix.lower() in IMG_EXTS]
-    label_of = {p: a.data / "labels" / p.parent.name / (p.stem + ".txt") for p in images}
-    folds = make_folds(images, a.folds, a.seed)
+    def imgs(d: Path):
+        return [p for p in d.glob("*") if p.suffix.lower() in IMG_EXTS]
+
+    if a.folds_from:
+        src = sorted(a.folds_from.glob("fold_*"), key=lambda d: int(d.name.split("_")[1]))
+        if not src:
+            sys.exit(f"No fold_* directories under {a.folds_from}")
+        plan = [(imgs(d / "images" / "val"), imgs(d / "images" / "train")) for d in src]
+    else:
+        images = [p for s in ("train", "val", "test") for p in imgs(a.data / "images" / s)]
+        plan = [(held, [p for p in images if p not in held])
+                for held in make_folds(images, a.folds, a.seed)]
+    plan = [(held, subsample(pool, a.train_fraction, a.seed)) for held, pool in plan]
 
     # Snapshot every fold now, so label edits made while this runs can't leak in.
-    for k, held_out in enumerate(folds):
+    for k, (held_out, train) in enumerate(plan):
         fd = out / f"fold_{k}"
-        for split, members in (("val", held_out), ("train", [p for p in images if p not in held_out])):
+        for split, members in (("val", held_out), ("train", train)):
             (fd / "images" / split).mkdir(parents=True)
             (fd / "labels" / split).mkdir(parents=True)
             for p in members:
                 shutil.copy2(p, fd / "images" / split / p.name)
-                if label_of[p].exists():
-                    shutil.copy2(label_of[p], fd / "labels" / split / (p.stem + ".txt"))
+                if label_of(p).exists():
+                    shutil.copy2(label_of(p), fd / "labels" / split / (p.stem + ".txt"))
         (fd / "data.yaml").write_text(
             yaml.safe_dump({"path": fd.as_posix(), "train": "images/train",
                             "val": "images/val", "names": names}), encoding="utf-8")
-    print(f"{len(images)} images -> {a.folds} folds of {[len(f) for f in folds]} (snapshot in {out})")
+    n_images = sum(len(h) for h, _ in plan)
+    print(f"{n_images} images -> {len(plan)} folds; held out {[len(h) for h, _ in plan]}, "
+          f"train {[len(t) for _, t in plan]} (snapshot in {out})")
 
     from ultralytics import YOLO
     from src.inference import YOLOv9Detector
 
     results = []
-    for k in range(a.folds):
+    for k in range(len(plan)):
         fd, name = out / f"fold_{k}", f"cv_{a.tag}_f{k}"
         subprocess.run(
             [sys.executable, "-m", "training.train", "--data", str(fd / "data.yaml"),
              "--weights", a.weights, "--epochs", str(a.epochs), "--patience", str(a.epochs),
              "--batch", str(a.batch), "--imgsz", str(a.imgsz), "--device", "0",
-             "--workers", "2", "--name", name],
+             "--workers", "2", "--name", name,
+             # Only best.pt is used; periodic checkpoints cost ~190 MB each.
+             "--save-period", "-1"],
             cwd=ROOT, check=True, stdout=open(fd / "train.log", "w", encoding="utf-8"),
             stderr=subprocess.STDOUT,
         )
@@ -152,7 +195,8 @@ def main() -> None:
     m50 = np.array([r["map50"] for r in results])
     m95 = np.array([r["map"] for r in results])
     summary = {
-        "tag": a.tag, "folds": a.folds, "epochs": a.epochs, "images": len(images),
+        "tag": a.tag, "folds": len(plan), "epochs": a.epochs, "images": n_images,
+        "train_fraction": a.train_fraction, "train_images": [len(t) for _, t in plan],
         "map50_mean": float(m50.mean()), "map50_std": float(m50.std(ddof=1)) if len(m50) > 1 else 0.0,
         "map_mean": float(m95.mean()),
         "recall_all": pooled(("microscope", "stained")),
