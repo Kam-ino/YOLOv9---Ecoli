@@ -37,3 +37,4 @@ frontend/.vite/
 data/ecoli_x8/
 # Hard-linked copies of the originals; labels there are the frozen human-only ground truth (tracked)
 data/ecoli_human/images/
+data/ecoli_x8_r2/

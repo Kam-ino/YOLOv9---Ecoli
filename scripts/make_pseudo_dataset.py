@@ -64,6 +64,12 @@ def main() -> None:
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--no-tiled", action="store_true", help="Whole-image inference only (app default is tiled).")
     ap.add_argument("--max-det", type=int, default=1200)
+    ap.add_argument("--refine", action="store_true",
+                    help="Also replace each existing box's coordinates with the teacher's matching box "
+                         "(IoU >= --overlap, same class, score >= --conf). Ultralytics' assigner scales the "
+                         "class target by box IoU, so loose human boxes cap confidence; tightened boxes lift it.")
+    ap.add_argument("--variant-k", default=None,
+                    help="Comma-separated orientation ids to write (default all 8), e.g. 0 for originals only.")
     a = ap.parse_args()
 
     import yaml
@@ -84,7 +90,7 @@ def main() -> None:
     # 2. Pseudo-label with the teacher.
     det = YOLOv9Detector(a.weights, imgsz=a.imgsz, conf_threshold=a.conf, iou_threshold=0.7,
                          class_names=[names[k] for k in sorted(names)], max_det=a.max_det)
-    pseudo, n_human, n_pseudo, n_skipped = {}, 0, 0, 0
+    pseudo, n_human, n_pseudo, n_skipped, n_refined = {}, 0, 0, 0, 0
     t0 = time.time()
     for i, (split, img) in enumerate(variants):
         frame = cv2.imread(str(img))
@@ -95,19 +101,28 @@ def main() -> None:
         have = rows_to_xyxy(rows, w, h)
         dets = det.predict(frame, tiled=not a.no_tiled)
         added = []
+        refined = 0
         for d in sorted(dets, key=lambda d: -d.confidence):
             box = np.array([d.bbox])
             if len(have) and iou_xyxy(box, have).max() >= a.overlap:
                 n_skipped += 1
+                if a.refine:
+                    j = int(iou_xyxy(box, have)[0].argmax())
+                    if j < len(rows) and int(rows[j][0]) == d.class_id and not rows[j][0] is None:
+                        x1, y1, x2, y2 = d.bbox
+                        rows[j][1:] = [(x1 + x2) / 2 / w, (y1 + y2) / 2 / h, (x2 - x1) / w, (y2 - y1) / h]
+                        have[j] = box[0]
+                        refined += 1
                 continue
             x1, y1, x2, y2 = d.bbox
             rows.append([d.class_id, (x1 + x2) / 2 / w, (y1 + y2) / 2 / h, (x2 - x1) / w, (y2 - y1) / h])
             have = np.vstack([have, box])
             added.append({"row": len(rows) - 1, "conf": round(d.confidence, 4), "class_id": d.class_id})
         write_labels(lab, rows)
-        if added:
+        if added or refined:
             pseudo[f"{split}/{img.name}"] = added
             n_pseudo += len(added)
+            n_refined += refined
         if (i + 1) % 50 == 0:
             print(f"  {i + 1}/{len(variants)} images, {n_pseudo} pseudo boxes so far", flush=True)
 
@@ -116,13 +131,14 @@ def main() -> None:
         "teacher": a.weights, "conf": a.conf, "overlap_iou": a.overlap, "imgsz": a.imgsz,
         "tiled": not a.no_tiled, "source": str(a.src), "n_images": len(variants),
         "n_human_boxes": n_human, "n_pseudo_boxes": n_pseudo, "n_detections_skipped_overlap": n_skipped,
+        "refine": a.refine, "n_boxes_refined": n_refined,
         "images": pseudo}, indent=1), encoding="utf-8")
     (a.dst / "data.yaml").write_text(yaml.safe_dump({
         "path": a.dst.resolve().as_posix(), "train": "images/train", "val": "images/val", "test": "images/test",
         "nc": len(names), "names": {k: names[k] for k in sorted(names)},
         "expanded": True, "pseudo_labels": "pseudo.json"}, sort_keys=False), encoding="utf-8")
-    print(f"{len(variants)} images: {n_human} human boxes (rotated) + {n_pseudo} pseudo boxes "
-          f"({n_skipped} detections skipped as overlapping) in {time.time() - t0:.0f}s -> {a.dst}")
+    print(f"{len(variants)} images: {n_human} existing boxes (rotated) + {n_pseudo} pseudo boxes, {n_refined} refined "
+          f"({n_skipped} detections overlapped an existing box) in {time.time() - t0:.0f}s -> {a.dst}")
 
 
 if __name__ == "__main__":
