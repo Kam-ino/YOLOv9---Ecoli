@@ -72,6 +72,11 @@ def parse_args() -> argparse.Namespace:
                    choices=("SGD", "Adam", "AdamW", "auto"),
                    help="Optimizer. AdamW is a safer default on small "
                         "microscopy datasets.")
+    p.add_argument("--cls", type=float, default=0.5,
+                   help="Classification loss gain (Ultralytics default 0.5). Higher "
+                        "pushes class confidence up; used in the confidence experiments.")
+    p.add_argument("--single-cls", action="store_true",
+                   help="Train all classes as one (ecoli + ecoli_cluster -> one class).")
     p.add_argument("--max-det", type=int, default=300,
                    help="Max detections per image during validation (Ultralytics "
                         "default 300 truncates dense slides; the comparison "
@@ -169,6 +174,8 @@ def main() -> None:
         save=True,
         save_period=args.save_period,
         max_det=args.max_det,
+        cls=args.cls,
+        single_cls=args.single_cls,
     )
 
     save_dir = Path(results.save_dir)

@@ -250,6 +250,7 @@ class YOLOv9Detector(_Detector):
         class_names: Optional[Sequence[str]] = None,
         warmup: bool = True,
         max_det: int = MAX_DET,
+        half: bool = False,
     ):
         weights = Path(weights_path)
         if not weights.exists():
@@ -278,6 +279,7 @@ class YOLOv9Detector(_Detector):
         self.conf = float(conf_threshold)
         self.iou = float(iou_threshold)
         self.max_det = int(max_det)
+        self.half = bool(half)          # FP16 inference (CUDA only); used by the benchmark
 
         # Prefer explicit class_names from config (authoritative). Fall
         # back to the model's embedded names (a dict on Ultralytics
@@ -313,6 +315,7 @@ class YOLOv9Detector(_Detector):
                 iou=self.iou,
                 max_det=self.max_det,
                 device=self.device,
+                half=self.half and self.device.startswith("cuda"),
                 verbose=False,
             )
         except Exception as exc:

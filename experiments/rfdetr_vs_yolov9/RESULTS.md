@@ -43,6 +43,15 @@ GT-area tercile edges: 529 and 1047 px².
 | 3 | 13 | 0.418 / 0.224 / 0.448 | 0.553 / 0.285 / 0.541 |
 | 4 | 13 | 0.560 / 0.282 / 0.558 | 0.546 / 0.239 / 0.546 |
 
+## Speed and size (NVIDIA GeForce RTX 5060 Laptop GPU, batch 1, fp16, 640 px, 5×69 images, post-processing included)
+
+| model | params (M) | GFLOPs | latency ms (mean ± sd) | median ms | FPS |
+|---|---|---|---|---|---|
+| YOLOv9-c | 25.3 | 102.3 | 279.0 ± 2728.3 | 25.1 | 3.6 |
+| RF-DETR | 36.5 | – | 47.5 ± 5.7 | 46.5 | 21.0 |
+
+RF-DETR: inference(dtype=float16) failed: ValueError('inference(inplace=True) requires compile=False. Compiled models can retain references to the original parameter storage, so setting model.model=None may not free the weight tensors and inplace=True would not reliably reduce memory usage.'); ran fp32
+
 ## Crowding analysis
 
 Crowding of a GT box = max IoU with any other GT box in its image. 72% of boxes touch another box; 12.3% overlap heavily (IoU > 0.5).
