@@ -15,7 +15,9 @@ import { useAlgorithm } from './useAlgorithm'
 // Per-algorithm form defaults. RF-DETR: COCO-pretrained variant name as
 // "weights", smaller batch (DINOv2 backbone at 640 px on an 8 GB GPU).
 const DEFAULTS: Record<Algorithm, { weights: string; epochs: number; batch: number }> = {
-  yolov9: { weights: 'yolov9c.pt', epochs: 250, batch: 16 },
+  // batch 16 at 640 px pages GPU memory to RAM on an 8 GB card (10x slower);
+  // 30 epochs over the 8-orientation dataset = the thesis step budget.
+  yolov9: { weights: 'yolov9c.pt', epochs: 30, batch: 8 },
   rfdetr: { weights: 'medium', epochs: 200, batch: 4 },
 }
 const ACTIVE_WEIGHTS: Record<Algorithm, string> = {

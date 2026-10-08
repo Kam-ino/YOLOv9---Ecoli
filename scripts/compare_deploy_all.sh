@@ -27,7 +27,10 @@ activate() {   # activate <src> <target>
   cp -p "$src" "$target" && echo "[$(date '+%F %T')] activated $src -> $target" >> "$LOG"
 }
 
-if $PY -m training.train --data training/dataset.yaml --weights models/yolov9c.pt --epochs 30 --batch 8 \
+# Resume an interrupted run from its last.pt (Ultralytics needs the checkpoint as the model).
+YW=models/yolov9c.pt; YR=""
+if [ -e runs/train/deploy_yolov9/weights/last.pt ]; then YW=runs/train/deploy_yolov9/weights/last.pt; YR="--resume"; fi
+if $PY -m training.train --data training/dataset.yaml --weights "$YW" $YR --epochs 30 --batch 8 \
      --imgsz 640 --device 0 --workers 2 --patience 0 --save-period -1 --max-det 1200 \
      --project "$PWD/runs/train" --name deploy_yolov9 >> "$LOG" 2>&1; then
   activate runs/train/deploy_yolov9/weights/best.pt models/best_yolov9c.pt
