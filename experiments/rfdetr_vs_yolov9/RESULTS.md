@@ -45,10 +45,12 @@ GT-area tercile edges: 529 and 1047 px².
 
 ## Speed and size (NVIDIA GeForce RTX 5060 Laptop GPU, batch 1, fp16, 640 px, 5×69 images, post-processing included)
 
-| model | params (M) | GFLOPs | latency ms (mean ± sd) | median ms | FPS |
-|---|---|---|---|---|---|
-| YOLOv9-c | 25.3 | 102.3 | 279.0 ± 2728.3 | 25.1 | 3.6 |
-| RF-DETR | 36.5 | – | 47.5 ± 5.7 | 46.5 | 21.0 |
+| model | params (M) | GFLOPs | latency ms median | p95 | mean | FPS (1/median) |
+|---|---|---|---|---|---|---|
+| YOLOv9-c | 25.3 | 102.3 | 25.1 | 38.9 | 279.0 | 39.8 |
+| RF-DETR | 36.5 | – | 46.5 | 54.0 | 47.5 | 21.5 |
+
+Median is the headline: YOLOv9's mean is dominated by a few dense slides where Ultralytics' NMS hits its 2 s time limit (tens of thousands of candidate boxes at conf 0.001–0.25); RF-DETR has no such tail.
 
 RF-DETR: inference(dtype=float16) failed: ValueError('inference(inplace=True) requires compile=False. Compiled models can retain references to the original parameter storage, so setting model.model=None may not free the weight tensors and inplace=True would not reliably reduce memory usage.'); ran fp32
 

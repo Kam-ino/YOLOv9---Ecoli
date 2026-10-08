@@ -56,8 +56,11 @@ def count_flops(module, imgsz: int, device: str):
     import torch
     from torch.utils.flop_counter import FlopCounterMode
     module.eval()
-    x = torch.zeros(1, 3, imgsz, imgsz, device=device)
-    with torch.no_grad(), FlopCounterMode(display=False) as fc:
+    dtype = next(module.parameters()).dtype
+    x = torch.zeros(1, 3, imgsz, imgsz, device=device, dtype=dtype)
+    # Some graphs (RF-DETR's deformable attention) assert on grad state under
+    # no_grad; count with autograd on and drop the result.
+    with FlopCounterMode(display=False) as fc:
         module(x)
     return fc.get_total_flops() / 1e9
 
@@ -124,7 +127,7 @@ def main() -> None:
             det = RFDETRDetector(str(weights), variant=a.variant, resolution=a.imgsz, num_queries=a.max_det, **common)
             if not a.fp32:
                 try:
-                    det.model.inference(dtype="float16", inplace=True)
+                    det.model.inference(compile=False, dtype="float16", inplace=True)
                 except Exception as exc:
                     out["models"].setdefault(algo, {})["fp16_note"] = f"inference(dtype=float16) failed: {exc!r}; ran fp32"
         module = find_module(det.model)

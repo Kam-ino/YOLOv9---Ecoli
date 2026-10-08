@@ -109,12 +109,15 @@ def main() -> None:
     if bench:
         L.append(f"## Speed and size ({bench['gpu']}, batch 1, {bench['dtype']}, {bench['imgsz']} px, "
                  f"{bench['passes']}×{bench['n_images']} images, post-processing included)\n")
-        L.append("| model | params (M) | GFLOPs | latency ms (mean ± sd) | median ms | FPS |")
-        L.append("|---|---|---|---|---|---|")
+        L.append("| model | params (M) | GFLOPs | latency ms median | p95 | mean | FPS (1/median) |")
+        L.append("|---|---|---|---|---|---|---|")
         for t, b in bench["models"].items():
             g = b.get("gflops_flop_counter") or b.get("gflops_ultralytics")
             L.append(f"| {LABEL.get(t, t)} | {f(b.get('params_M'), 1)} | {f(g, 1)} | "
-                     f"{b['mean_ms']:.1f} ± {b['std_ms']:.1f} | {b['median_ms']:.1f} | {b['fps']:.1f} |")
+                     f"{b['median_ms']:.1f} | {b['p95_ms']:.1f} | {b['mean_ms']:.1f} | {1000 / b['median_ms']:.1f} |")
+        L.append("\nMedian is the headline: YOLOv9's mean is dominated by a few dense slides where "
+                 "Ultralytics' NMS hits its 2 s time limit (tens of thousands of candidate boxes at conf 0.001–0.25); "
+                 "RF-DETR has no such tail.")
         notes = [f"{LABEL.get(t, t)}: {b['fp16_note']}" for t, b in bench["models"].items() if "fp16_note" in b]
         L.append(("\n" + "; ".join(notes) + "\n") if notes else "")
 
