@@ -267,3 +267,32 @@ accumulator == pycocotools, bootstrap Δ = 0), fold assertions in
   it is the same for both models and was excluded from the paper protocol.
 - Deployable models on all 552 images: YOLO interrupted at epoch 21 by a
   Train-tab run (batch 16, paging), resumed 2026-10-08 12:15; RF-DETR follows.
+
+## Confidence experiments (2026-10-08, fold 0, held-out human labels)
+
+Dominic needs most detections above score 0.60. Baseline round-1 models find
+cells but score them low (YOLO median score of a correctly found cell 0.25;
+recall at >= 0.60 only 0.11). `scripts/confidence_eval.py` measures this;
+`scripts/confidence_experiments.sh` ran the variants (all YOLOv9-c, fold 0):
+
+| variant | R@.25 | R@.60 | P@.60 | found cells >= .60 | mAP50 |
+|---|---|---|---|---|---|
+| A 29 ep (round 1) | .46 | .11 | .71 | .15 | .417 |
+| B 90 ep | .48 | .11 | .73 | .14 | .452 |
+| C cls gain 2.0 | .45 | .10 | .80 | .12 | .417 |
+| D single class | .45 | .10 | .74 | .13 | .425 |
+| E 90 ep + cls 2.0 | .42 | .11 | .65 | .13 | .379 |
+| F round 2 (refined boxes), 29 ep | .52 | .22 | .71 | .27 | .445 |
+| G round 2, 90 ep | .54 | .26 | .68 | – | – |
+
+Training knobs do nothing for confidence. Self-training round 2
+(`make_pseudo_dataset.py --refine`: the fold-0 90-ep model's boxes replace
+the coordinates of the human boxes they match — 46,177 of them — and fill
+27,885 gaps) doubles recall at 0.60 and improves mAP50. Mechanism:
+Ultralytics' task-aligned assigner scales the class target by box IoU, so
+loose human boxes cap the reachable confidence; tightened boxes lift it.
+Caveat: each round pulls labels toward the model's own opinion; stop at two
+rounds unless the boxes are reviewed. Applied to the deployable models by
+`scripts/deploy_round2.sh` (teacher = round-1 deployable YOLO; YOLO 90 ep,
+RF-DETR 25 ep; round-1 weights kept as `models/best_*.round1.*`).
+The paper's comparison stays on round-1 data (`data/ecoli_x8`).
