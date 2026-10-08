@@ -244,3 +244,26 @@ accumulator == pycocotools, bootstrap Δ = 0), fold assertions in
   early-stopped YOLO predictions are kept as `yolov9_es` (sensitivity row);
   RF-DETR's early-stopped folds 0–1 (`fold0_x8`, `fold1_x8`) are incomplete
   and unused. Full-budget runs: `fold<k>_x8_full`, started 04:20.
+- 2026-10-07/08: the laptop slept four times (09:49-11:55, 12:02-17:26,
+  19:06 and overnight); RF-DETR folds 3-4 paused each time, so wall times in
+  `train_all.log` include the pauses. Folds done 2026-10-08 11:15.
+- 2026-10-08 12:05: **results** (`RESULTS.md`, commit `bd9a9ad`). RF-DETR
+  mAP50 0.473 / mAP50-95 0.210 vs YOLOv9-c 0.362 / 0.156 pooled; delta
+  mAP50-95 +0.052 [+0.020, +0.084]; Wilcoxon p < 1e-5; RF-DETR fold std is
+  half of YOLO's. Crowding: RF-DETR +16 pts recall on isolated, +7 on
+  touching, overlapping CI spans 0, heavy bin -5 pts (CI [-0.50, +0.02]).
+  The heavy bin is bacteria-on-bacteria overlap (702 of 733 boxes have a
+  same-class partner, 673 of them `ecoli`), not cluster/member nesting.
+  YOLO NMS sweep: heavy-bin recall rises 0.49 -> 0.76 from IoU 0.5 -> 0.9
+  but duplicates reach 39 %; at the 0.7 used, YOLO already matches RF-DETR
+  there. Reading for the paper: the NMS-free detector is better overall and
+  more stable across folds, but its advantage is *not* in the crowded
+  regime; the hypothesis as stated is not supported.
+- Qualitative panel (`figures/qualitative_dense.png`): on the densest
+  stained slides both models find a small fraction of cells at 640 px
+  whole-image inference (1,043 GT -> YOLO 198 / RF-DETR 352; 267 GT ->
+  7 / 55). Cells there are ~8 px after the 3x downscale. Native-resolution
+  tiling (the app's path) or 1024 px training is the obvious next lever;
+  it is the same for both models and was excluded from the paper protocol.
+- Deployable models on all 552 images: YOLO interrupted at epoch 21 by a
+  Train-tab run (batch 16, paging), resumed 2026-10-08 12:15; RF-DETR follows.
