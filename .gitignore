@@ -40,3 +40,5 @@ data/ecoli_human/images/
 data/ecoli_x8_r2/
 data/ecoli_x8_r2d/
 models/*.round1.*
+# Deployable RF-DETR weights are tracked (fp16 via scripts/slim_checkpoint.py, ~73 MB, under GitHub's 100 MB limit)
+!models/best_rfdetr.pth

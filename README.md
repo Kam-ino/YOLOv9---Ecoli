@@ -194,7 +194,7 @@ The app serves two interchangeable detectors behind one API:
 |---|---|---|
 | library | `ultralytics` | `rfdetr` (DINOv2 backbone + DETR decoder, **no NMS**) |
 | wrapper | `src.inference.YOLOv9Detector` | `src.inference.RFDETRDetector` |
-| fine-tuned weights | `models/best_yolov9c.pt` | `models/best_rfdetr.pth` (not git-tracked: >100 MB) |
+| fine-tuned weights | `models/best_yolov9c.pt` | `models/best_rfdetr.pth` (git-tracked as fp16, ~73 MB; `scripts/slim_checkpoint.py` shrinks a fresh 146 MB training checkpoint to fit GitHub's 100 MB limit) |
 | without a fine-tuned file | needs `models/yolov9c.pt` | downloads the COCO-pretrained variant (~390 MB, cached in `~/.roboflow/models`) |
 | training entry point | `training/train.py` | `training/train_rfdetr.py` (same CLI flags) |
 
