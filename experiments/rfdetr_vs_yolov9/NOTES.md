@@ -296,3 +296,9 @@ rounds unless the boxes are reviewed. Applied to the deployable models by
 `scripts/deploy_round2.sh` (teacher = round-1 deployable YOLO; YOLO 90 ep,
 RF-DETR 25 ep; round-1 weights kept as `models/best_*.round1.*`).
 The paper's comparison stays on round-1 data (`data/ecoli_x8`).
+- 2026-10-09 11:06: deployable round-2 models active (YOLO 90 ep, RF-DETR
+  25 ep; teacher = round-1 deployable YOLO; 29,616 gaps filled, 51,383 boxes
+  tightened). On the screenshot image (a training frame, 135 labelled cells)
+  detections at >= 0.60 went YOLO 19 -> 84, RF-DETR 40 -> 88; median score of
+  detections above 0.25 went 0.39 -> 0.59 (YOLO). Upload-tab slider default
+  set to 0.30. Round-1 weights kept as `models/best_*.round1.*`.

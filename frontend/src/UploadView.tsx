@@ -31,7 +31,9 @@ export default function UploadView() {
   const [result, setResult] = useState<PredictResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [confFilter, setConfFilter] = useState(0.0)
+  // Default = the F1-maximising threshold band found in cross-validation
+  // (0.15-0.35 for both detectors); 0.60 keeps only the easiest cells.
+  const [confFilter, setConfFilter] = useState(0.3)
   const [algorithm, setAlgorithm] = useAlgorithm()
 
   const onPick = useCallback((f: File) => {
