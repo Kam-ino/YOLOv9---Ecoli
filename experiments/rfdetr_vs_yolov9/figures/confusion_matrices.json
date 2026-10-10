@@ -1,0 +1,50 @@
+{
+ "yolov9": {
+  "labels": [
+   "ecoli",
+   "ecoli_cluster",
+   "background"
+  ],
+  "matrix": [
+   [
+    2447,
+    6,
+    2720
+   ],
+   [
+    11,
+    343,
+    410
+   ],
+   [
+    4662,
+    569,
+    0
+   ]
+  ]
+ },
+ "rfdetr": {
+  "labels": [
+   "ecoli",
+   "ecoli_cluster",
+   "background"
+  ],
+  "matrix": [
+   [
+    2908,
+    18,
+    2247
+   ],
+   [
+    12,
+    409,
+    343
+   ],
+   [
+    4355,
+    599,
+    0
+   ]
+  ]
+ }
+}
