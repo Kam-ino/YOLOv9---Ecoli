@@ -725,6 +725,7 @@ def _mjpeg_generator(
     consecutive_failures = 0
     last_dets: list = []          # most recent detection list, drawn on skip frames
     frame_idx = 0
+    infer_error: Optional[str] = None
 
     try:
         cap = _open_source_with_retry(source)
@@ -754,14 +755,28 @@ def _mjpeg_generator(
                     # boxes in between. The lock is only held while we
                     # actually call the model.
                     if (frame_idx - 1) % infer_every == 0:
-                        with service.lock:
-                            raw = det.predict(frame)
+                        try:
+                            with service.lock:
+                                raw = det.predict(frame)
+                        except Exception as exc:  # noqa: BLE001 — keep the feed alive
+                            # A detector failure (CUDA OOM, bad frame) used to
+                            # kill the generator and leave a blank pane with no
+                            # error. Keep streaming raw frames and say so on-screen.
+                            if infer_error is None:
+                                log.error("Stream inference failed (%s): %s", det.algorithm, exc)
+                            infer_error = f"{det.algorithm}: {type(exc).__name__}"
+                            raw = last_dets
+                        else:
+                            infer_error = None
                         # UI confidence floor: drop weak detections before
                         # they reach the draw stage.
                         if min_conf > 0.0:
                             raw = [d for d in raw if d.confidence >= min_conf]
                         last_dets = raw
                     draw_detections(frame, last_dets)
+                    if infer_error:
+                        cv2.putText(frame, f"detector error - {infer_error}", (10, frame.shape[0] - 12),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
                     dt = time.perf_counter() - t0
                     if dt > 0:
                         fps_window.append(1.0 / dt)

@@ -47,6 +47,21 @@ class DetectorService:
         log.info("Initializing %s detector from %s", default, config_path)
         self._detectors[default] = self._build(default, self._weights_path(default))
         log.info("Detector ready.")
+        # Pre-load the other detector too when its fine-tuned weights are on
+        # disk: a lazy load inside the first live-stream request held the
+        # stream open for ~10 s with no frames (looked like a dead feed).
+        for algo in ALGORITHMS:
+            if algo in self._detectors or not self._installed(algo):
+                continue
+            weights = self._weights_path(algo)
+            if not weights.is_file():
+                continue
+            try:
+                t0 = time.time()
+                self._detectors[algo] = self._build(algo, weights)
+                log.info("Pre-loaded %s detector in %.1f s.", algo, time.time() - t0)
+            except InferenceError as exc:          # non-fatal: it will retry lazily
+                log.warning("Could not pre-load %s detector: %s", algo, exc)
 
     # ------------------------------------------------------------------
 
