@@ -289,6 +289,20 @@ code {
   color: var(--accent);
   margin-right: 4px;
 }
+.verdict {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+.verdict-ok { color: var(--accent); }
+.verdict-bad { color: var(--error); }
+.verdict .muted { font-weight: 400; }
 .muted { color: var(--fg-muted); font-size: 0.8rem; }
 .small { font-size: 0.85rem; }
 

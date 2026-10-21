@@ -156,9 +156,20 @@ function DetectionList({
     return <aside className="det-list empty">No results yet — choose an image and click Detect.</aside>
   }
   const shown = result.detections.filter((d) => d.confidence >= confFilter)
+  // Drinking-water limit (WHO/EPA) is zero E. coli, so any detection that
+  // passes the slider fails the sample. Same rule as the live-stream HUD.
+  const contaminated = filteredCount > 0
   return (
     <aside className="det-list">
       <div className="det-summary">
+        <div className={`verdict ${contaminated ? 'verdict-bad' : 'verdict-ok'}`}>
+          {contaminated ? 'CONTAMINATED' : 'NOT CONTAMINATED'}
+          <span className="muted">
+            {contaminated
+              ? `E. coli detected at ≥ ${confFilter.toFixed(2)} confidence`
+              : `No E. coli at ≥ ${confFilter.toFixed(2)} confidence in this image`}
+          </span>
+        </div>
         <div>
           <strong>{filteredCount}</strong>
           <span className="muted"> / {result.detections.length} detections</span>

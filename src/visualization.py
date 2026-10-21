@@ -74,31 +74,36 @@ def draw_hud(
     detection_count: int,
     frame_number: Optional[int] = None,
 ) -> np.ndarray:
-    """Top-left HUD: frame number, FPS, per-frame detection count.
+    """Top-left HUD: frame number, FPS, per-frame detection count, and the
+    water verdict.
 
     Drawn on a translucent black backdrop so it reads against any image.
     """
+    green, red = (0, 255, 0), (0, 0, 255)
     lines = []
     if frame_number is not None:
-        lines.append(f"Frame: {frame_number}")
-    lines.append(f"FPS: {fps:5.1f}")
-    lines.append(f"Detections: {detection_count}")
+        lines.append((f"Frame: {frame_number}", green))
+    lines.append((f"FPS: {fps:5.1f}", green))
+    lines.append((f"Detections: {detection_count}", green))
+    # Drinking-water limit (WHO/EPA) is zero E. coli, so one detection that
+    # survives the confidence floor fails the sample.
+    lines.append(("CONTAMINATED", red) if detection_count else ("NOT CONTAMINATED", green))
 
     x, y = 10, 10
     pad = 6
     line_h = 22
     box_h = pad * 2 + line_h * len(lines)
-    box_w = 200
+    box_w = 220
 
     # Translucent backdrop for legibility against bright/textured frames.
     overlay = frame.copy()
     cv2.rectangle(overlay, (x, y), (x + box_w, y + box_h), (0, 0, 0), cv2.FILLED)
     cv2.addWeighted(overlay, 0.5, frame, 0.5, 0, dst=frame)
 
-    for i, line in enumerate(lines):
+    for i, (line, color) in enumerate(lines):
         cv2.putText(
             frame, line,
             (x + pad, y + pad + line_h * (i + 1) - 6),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1, cv2.LINE_AA,
+            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 1, cv2.LINE_AA,
         )
     return frame
