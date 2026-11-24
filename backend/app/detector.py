@@ -14,6 +14,7 @@ calls on a single model instance, and this is a single-user app.
 """
 import importlib.util
 import logging
+import os
 import shutil
 import time
 from pathlib import Path
@@ -32,6 +33,18 @@ _BASE_WEIGHTS = Path("models/yolov9c.pt")
 log = logging.getLogger(__name__)
 
 
+def _leave_core_for_stream() -> None:
+    """CPU-only host (a Pi): run the model on all cores but one so the live
+    stream's capture / CLAHE / JPEG loop isn't starved while it infers.
+    ECOLI_TORCH_THREADS overrides the count."""
+    import torch
+    if torch.cuda.is_available():
+        return
+    n = int(os.environ.get("ECOLI_TORCH_THREADS") or max(1, (os.cpu_count() or 1) - 1))
+    torch.set_num_threads(n)
+    log.info("CPU inference threads: %d (ECOLI_TORCH_THREADS to change)", n)
+
+
 class DetectorService:
     """Lazy singleton — :meth:`init` must be called once before use."""
 
@@ -43,6 +56,7 @@ class DetectorService:
 
     def init(self, config_path: str) -> None:
         self._cfg = load_config(config_path)
+        _leave_core_for_stream()
         default = self._cfg.model.algorithm
         log.info("Initializing %s detector from %s", default, config_path)
         self._detectors[default] = self._build(default, self._weights_path(default))

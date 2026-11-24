@@ -28,6 +28,18 @@ log() { printf '\033[1;36m→\033[0m %s\n' "$*"; }
 ok()  { printf '\033[1;32m✓\033[0m %s\n' "$*"; }
 err() { printf '\033[1;31m✗\033[0m %s\n' "$*" >&2; }
 
+# --- 0. System libraries OpenCV loads (absent on Ubuntu Server) ----------
+
+missing=()
+for pair in libGL.so.1:libgl1 libgthread-2.0.so.0:libglib2.0-0 libxcb.so.1:libxcb1; do
+    /sbin/ldconfig -p 2>/dev/null | grep -q "${pair%%:*}" || missing+=("${pair##*:}")
+done
+if (( ${#missing[@]} )); then
+    err "OpenCV needs system libraries that aren't installed:"
+    err "  sudo apt install -y ${missing[*]}"
+    exit 1
+fi
+
 # --- 1. Python venv -------------------------------------------------------
 
 if [[ ! -x ".venv/bin/python" ]]; then

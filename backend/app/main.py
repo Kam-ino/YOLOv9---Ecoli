@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Iterator, List, Optional, Union
@@ -35,6 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from src.capture import CaptureError, VideoSource
 from src.inference import InferenceError
@@ -294,12 +296,18 @@ def create_app() -> FastAPI:
             )
 
         h, w = frame.shape[:2]
-        with service.lock:
-            t0 = time.perf_counter()
-            # Still image: latency matters less than finding small cells on
-            # a large slide, so allow native-resolution tiling.
-            dets = detector.predict(frame, tiled=True)
-            inference_ms = (time.perf_counter() - t0) * 1000.0
+
+        def infer():
+            with service.lock:
+                t0 = time.perf_counter()
+                # Still image: latency matters less than finding small cells on
+                # a large slide, so allow native-resolution tiling.
+                found = detector.predict(frame, tiled=True)
+                return found, (time.perf_counter() - t0) * 1000.0
+
+        # Off the event loop: a multi-second CPU inference here used to freeze
+        # every other request (live stream included) until it finished.
+        dets, inference_ms = await run_in_threadpool(infer)
 
         return PredictResponse(
             detections=[
@@ -324,8 +332,8 @@ def create_app() -> FastAPI:
         annotate: bool = Query(True, description="Run inference and draw boxes."),
         infer_every: int = Query(
             1, ge=1, le=30,
-            description="Run inference once every N frames; reuse last boxes "
-                        "for intermediate frames. Trades box freshness for FPS.",
+            description="Start inference at most once every N frames. It runs in "
+                        "the background, so the video never waits on it.",
         ),
         min_conf: float = Query(
             0.0, ge=0.0, le=1.0,
@@ -680,6 +688,11 @@ _MAX_CONSECUTIVE_READ_FAILURES = 30
 _STREAM_OPEN_ATTEMPTS = 10
 _STREAM_OPEN_RETRY_DELAY = 0.2
 
+# Frames sent to the browser per second. Inference no longer limits the
+# stream's rate, so uncapped a 30 fps 720p feed would flood a home upload
+# link through the tunnel and burn Pi CPU on CLAHE + JPEG. Tune to taste.
+_STREAM_MAX_FPS = 15.0
+
 
 def _open_source_with_retry(source: Union[int, str]) -> VideoSource:
     """Open ``source`` as a VideoSource, retrying briefly on CaptureError.
@@ -704,6 +717,12 @@ def _open_source_with_retry(source: Union[int, str]) -> VideoSource:
     raise last_exc
 
 
+def _predict_locked(det, frame: np.ndarray) -> list:
+    """Stream worker body: one inference under the model lock."""
+    with service.lock:
+        return det.predict(frame)
+
+
 def _mjpeg_generator(
     source: Union[int, str],
     annotate: bool,
@@ -711,27 +730,32 @@ def _mjpeg_generator(
     min_conf: float = 0.0,
     detector=None,
 ) -> Iterator[bytes]:
-    """Yield multipart/MJPEG frames; optionally annotate each frame in-process.
+    """Yield multipart/MJPEG frames annotated with the newest detections.
 
-    When ``infer_every > 1``, inference runs once every N frames and the
-    last detection list is re-drawn on the intermediate frames. On a
-    CPU-bound host this is the single biggest knob for live FPS — the
-    boxes are slightly stale but visually convincing while the source
-    framerate is preserved.
+    Inference runs on one worker thread, a frame at a time, while this loop
+    keeps streaming camera frames (capped at ``_STREAM_MAX_FPS``) with the
+    latest boxes drawn on them. On a CPU-only host — a Raspberry Pi needs
+    seconds per frame — the video stays live and the boxes refresh as fast
+    as the model allows, instead of the feed freezing on every inference.
+    ``infer_every`` additionally spaces inference starts N frames apart.
     """
     cfg = service.config
     det = detector if detector is not None else service.detector
     fps_window: list[float] = []
     consecutive_failures = 0
-    last_dets: list = []          # most recent detection list, drawn on skip frames
+    last_dets: list = []          # newest detection list, drawn on every frame
     frame_idx = 0
+    last_submit = -infer_every    # frame_idx of the last inference start
+    pending: Optional[Future] = None
     infer_error: Optional[str] = None
+    is_file = isinstance(source, str) and Path(source).is_file()
+    last_yield = 0.0
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stream-infer")
 
     try:
         cap = _open_source_with_retry(source)
         try:
             while True:
-                t0 = time.perf_counter()
                 ok, frame = cap.read()
                 if not ok or frame is None:
                     consecutive_failures += 1
@@ -741,6 +765,16 @@ def _mjpeg_generator(
                         break
                     continue
                 consecutive_failures = 0
+
+                wait = 1.0 / _STREAM_MAX_FPS - (time.perf_counter() - last_yield)
+                if wait > 0:
+                    if not is_file:
+                        continue          # live camera: drop it, keep the buffer fresh
+                    time.sleep(wait)      # file: pace playback instead of skipping
+                now = time.perf_counter()
+                if last_yield:
+                    fps_window = (fps_window + [1.0 / (now - last_yield)])[-30:]
+                last_yield = now
                 frame_idx += 1
 
                 if cfg.preprocessing.apply_clahe:
@@ -751,37 +785,28 @@ def _mjpeg_generator(
                     )
 
                 if annotate:
-                    # Only run inference on every Nth frame; reuse last
-                    # boxes in between. The lock is only held while we
-                    # actually call the model.
-                    if (frame_idx - 1) % infer_every == 0:
+                    if pending is not None and pending.done():
                         try:
-                            with service.lock:
-                                raw = det.predict(frame)
+                            raw = pending.result()
                         except Exception as exc:  # noqa: BLE001 — keep the feed alive
-                            # A detector failure (CUDA OOM, bad frame) used to
-                            # kill the generator and leave a blank pane with no
-                            # error. Keep streaming raw frames and say so on-screen.
+                            # A detector failure (CUDA OOM, bad frame) must not
+                            # kill the stream: keep the last boxes, say so on-screen.
                             if infer_error is None:
                                 log.error("Stream inference failed (%s): %s", det.algorithm, exc)
                             infer_error = f"{det.algorithm}: {type(exc).__name__}"
-                            raw = last_dets
                         else:
                             infer_error = None
-                        # UI confidence floor: drop weak detections before
-                        # they reach the draw stage.
-                        if min_conf > 0.0:
-                            raw = [d for d in raw if d.confidence >= min_conf]
-                        last_dets = raw
+                            # UI confidence floor: drop weak detections before drawing.
+                            last_dets = [d for d in raw if d.confidence >= min_conf] if min_conf > 0.0 else raw
+                        pending = None
+                    if pending is None and frame_idx - last_submit >= infer_every:
+                        # Copy: the worker reads it while we draw on this one.
+                        pending = pool.submit(_predict_locked, det, frame.copy())
+                        last_submit = frame_idx
                     draw_detections(frame, last_dets)
                     if infer_error:
                         cv2.putText(frame, f"detector error - {infer_error}", (10, frame.shape[0] - 12),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-                    dt = time.perf_counter() - t0
-                    if dt > 0:
-                        fps_window.append(1.0 / dt)
-                        if len(fps_window) > 30:
-                            fps_window.pop(0)
                     fps = sum(fps_window) / len(fps_window) if fps_window else 0.0
                     draw_hud(frame, fps=fps, detection_count=len(last_dets))
 
@@ -807,6 +832,9 @@ def _mjpeg_generator(
         # The generator can't raise HTTP errors after headers are sent;
         # the browser will see the connection close.
         log.error("Stream capture failed: %s", exc)
+    finally:
+        # Don't wait on an in-flight inference; its thread exits when done.
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 # Module-level app for `uvicorn backend.app.main:app`.

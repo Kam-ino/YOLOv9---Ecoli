@@ -90,10 +90,9 @@ def draw_hud(
     box_h = pad * 2 + line_h * len(lines)
     box_w = 200
 
-    # Translucent backdrop for legibility against bright/textured frames.
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (x, y), (x + box_w, y + box_h), (0, 0, 0), cv2.FILLED)
-    cv2.addWeighted(overlay, 0.5, frame, 0.5, 0, dst=frame)
+    # Translucent backdrop for legibility: halve the box region only (a
+    # whole-frame copy + blend cost more than the rest of the HUD).
+    frame[y:y + box_h, x:x + box_w] //= 2
 
     for i, line in enumerate(lines):
         cv2.putText(

@@ -13,6 +13,7 @@ Accepted sources:
     * ``str`` (``rtsp://``, ``http://``) — IP camera streams
 """
 import logging
+import sys
 from typing import Optional, Tuple, Union
 
 import cv2
@@ -59,6 +60,11 @@ class VideoSource:
                 "and (4) on Linux your user is in the 'video' group."
             )
 
+        # Linux/V4L2 defaults USB cams to raw YUYV, which USB 2 can only
+        # carry at ~5-10 fps for 720p; MJPG gets the camera's full rate.
+        # Must be set before the resolution. Cameras without MJPG ignore it.
+        if sys.platform.startswith("linux") and isinstance(self._source, int):
+            self._cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         if self._req_width:
             self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(self._req_width))
         if self._req_height:
@@ -68,10 +74,12 @@ class VideoSource:
 
         # Many USB cams silently ignore set() requests for unsupported
         # modes — log what we actually got so misconfiguration is visible.
+        fourcc = int(self._cap.get(cv2.CAP_PROP_FOURCC))
         log.info(
-            "Capture opened: requested %sx%s @ %s fps; actual %dx%d @ %.1f fps",
+            "Capture opened: requested %sx%s @ %s fps; actual %dx%d @ %.1f fps (%s)",
             self._req_width, self._req_height, self._req_fps,
             self.width, self.height, self.fps or 0.0,
+            "".join(chr((fourcc >> 8 * i) & 0xFF) for i in range(4)).strip("\0") or "?",
         )
         return self
 
