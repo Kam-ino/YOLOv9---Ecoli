@@ -120,7 +120,7 @@ Wants=network-online.target
 Type=simple
 User=$APP_USER
 # cloudflared reads credentials from ~/.cloudflared by default.
-ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate run $TUNNEL_NAME
+ExecStart=$(command -v cloudflared) tunnel --no-autoupdate run $TUNNEL_NAME
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
