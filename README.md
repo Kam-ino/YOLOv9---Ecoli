@@ -16,7 +16,8 @@ frontend on top) with no changes.
 ```
 .
 ├── config.yaml                # Runtime configuration
-├── requirements.txt
+├── requirements.txt           # Runtime deps (Pi)
+├── requirements-train.txt     # + training-only deps
 ├── src/
 │   ├── main.py                # CLI entry point — live detection loop
 │   ├── capture.py             # cv2.VideoCapture wrapper
@@ -61,7 +62,8 @@ python -m venv .venv
 # source .venv/bin/activate
 
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirements.txt          # run the app (all a Raspberry Pi needs)
+pip install -r requirements-train.txt    # + training deps (GPU workstation)
 ```
 
 > If you have a CUDA GPU, install the matching PyTorch build **first**

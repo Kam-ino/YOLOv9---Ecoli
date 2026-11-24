@@ -121,8 +121,9 @@ def main() -> None:
 
     try:
         import rfdetr
+        import pytorch_lightning  # noqa: F401 — from rfdetr[train]; base rfdetr can't train
     except ImportError:
-        log.error("rfdetr not installed. Run: pip install -r requirements.txt")
+        log.error("RF-DETR training deps not installed. Run: pip install -r requirements-train.txt")
         sys.exit(1)
 
     # --weights: variant name → COCO-pretrained; otherwise a checkpoint file.

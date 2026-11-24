@@ -1,0 +1,15 @@
+# Training host (GPU workstation): everything in requirements.txt plus the
+# packages only training needs. Not needed on the Pi.
+#   pip install -r requirements-train.txt
+-r requirements.txt
+
+# RF-DETR training: PyTorch Lightning + COCO eval backends; tensorboard is
+# its default logger.
+rfdetr[train]>=1.11.0
+tensorboard>=2.13.0
+
+# Picked up automatically by Ultralytics for richer training-time augmentation.
+albumentations>=1.4.0
+
+# Only for .onnx weights / export; the shipped .pt models don't need it.
+onnxruntime>=1.17.0

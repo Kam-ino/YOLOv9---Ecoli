@@ -19,17 +19,9 @@ fastapi>=0.110.0
 uvicorn[standard]>=0.27.0
 python-multipart>=0.0.9
 
-# --- Optional but recommended ---
-# Picked up automatically by Ultralytics for richer training-time augmentation.
-albumentations>=1.4.0
+# RF-DETR — second detector (NMS-free transformer). The base package is
+# inference only; its training extras are in requirements-train.txt.
+rfdetr>=1.11.0
 
-# --- Optional: pure-ONNX inference path ---
-# Ultralytics already loads .onnx via YOLO(...), but installing onnxruntime
-# explicitly enables the lightweight ONNX-only deployment path (e.g. on a Pi
-# or any host where you don't want PyTorch installed).
-onnxruntime>=1.17.0
-
-# RF-DETR — second detector (NMS-free transformer). [train] pulls in
-# PyTorch Lightning + COCO eval backends; tensorboard is its default logger.
-rfdetr[train]>=1.11.0
-tensorboard>=2.13.0
+# This file is everything needed to RUN the app (detect, live stream,
+# label) — e.g. on the Raspberry Pi. To TRAIN, use requirements-train.txt.

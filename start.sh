@@ -64,6 +64,12 @@ fi
 if ! "$PYTHON" -c "import fastapi, ultralytics, cv2, uvicorn" 2>/dev/null; then
     log "Installing Python deps (this is ~15 min on a Pi the first time)..."
     "$PYTHON" -m pip install --upgrade pip >/dev/null
+    # ARM64 (Raspberry Pi): PyTorch's CPU-only wheel is 171 MB vs 484 MB
+    # from PyPI. No-op if torch is already installed.
+    # ponytail: assumes ARM64 means no CUDA; a Jetson needs NVIDIA's wheels anyway.
+    if [[ "$(uname -m)" == "aarch64" ]]; then
+        "$PYTHON" -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+    fi
     "$PYTHON" -m pip install -r requirements.txt
     ok "Python deps installed"
 fi
