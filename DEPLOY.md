@@ -16,7 +16,7 @@ with an NVIDIA GPU — and is reached over HTTPS through a tunnel. Any device
                                          └──────────────────┘   └──────────────┘
 ```
 
-When the UI is built with `VITE_API_BASE_URL` (i.e. on Vercel), the Live
+When the UI is built with `API_BASE_URL` (i.e. on Vercel), the Live
 tab and the Label tab's Snapshot read the camera **of the device viewing the
 page** and upload frames to the backend; boxes are drawn in the browser. The
 backend's own camera is not used.
@@ -44,7 +44,7 @@ Vercel project → **Settings → Environment Variables**:
 
 | Name | Value |
 |---|---|
-| `VITE_API_BASE_URL` | `https://my-pc.tail1234.ts.net` (no trailing slash) |
+| `API_BASE_URL` | `https://my-pc.tail1234.ts.net` (no trailing slash) |
 
 Then **Deployments → ⋯ → Redeploy**. Vite bakes the variable into the
 bundle at build time, so changing it always needs a redeploy.
@@ -94,20 +94,20 @@ If the PC or the backend is off, the page loads but every API call fails.
 |---|---|---|
 | Status badge shows an error / `Failed to fetch` | Backend or Funnel not running | `deploy\serve-pc.bat …`; `tailscale funnel status` |
 | `CORS error` in the console | Vercel origin not allowed | Pass the exact `https://YOUR-APP.vercel.app` to `serve-pc.bat` |
-| `Mixed content blocked` | `VITE_API_BASE_URL` is `http://` | Use the Funnel's `https://` address, redeploy |
+| `Mixed content blocked` | `API_BASE_URL` is `http://` | Use the Funnel's `https://` address, redeploy |
 | "Camera permission was denied" | Chromium blocked the camera | Click the camera icon in the address bar → Allow, reload |
 | "No camera found" | Microscope not detected by the viewer's device | Replug it; check `ls /dev/video*` on the Pi |
 
 **No Tailscale?** `cloudflared tunnel --url http://localhost:8003` gives an
 HTTPS address without an account, but it changes on every start, so you'd
-update `VITE_API_BASE_URL` and redeploy each time. Avoid free ngrok: its
+update `API_BASE_URL` and redeploy each time. Avoid free ngrok: its
 browser-warning page breaks the API calls.
 
 ---
 
 ## Going back to fully local
 
-Leaving `VITE_API_BASE_URL` empty makes every fetch a same-origin `/api/*`
+Leaving `API_BASE_URL` empty makes every fetch a same-origin `/api/*`
 call and the Live tab uses the backend's camera (`source` 0, 1, …):
 
 ```powershell

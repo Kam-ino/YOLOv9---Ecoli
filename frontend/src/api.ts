@@ -4,14 +4,14 @@
 //   - empty (default): use relative `/api/*` — works for local dev (Vite
 //     proxies to localhost:8003) and for local single-process serve
 //     (uvicorn serves both UI and API on the same port).
-//   - set via `VITE_API_BASE_URL` at build time: prepended to every
+//   - set via `API_BASE_URL` at build time: prepended to every
 //     fetch. Required when the UI is hosted somewhere other than the
-//     backend (e.g. UI on Vercel, backend reached through a Cloudflare
-//     or ngrok tunnel).
+//     backend (e.g. UI on Vercel, backend reached through a tunnel such
+//     as Tailscale Funnel).
 //
 // IMPORTANT: when the UI is HTTPS (Vercel) the API base MUST also be
 // HTTPS, otherwise the browser blocks the request as mixed content.
-const API_BASE: string = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')
+const API_BASE: string = (import.meta.env.API_BASE_URL || '').replace(/\/+$/, '')
 
 // Backend on another host (e.g. a cloud server): it has no microscope, so
 // the Live / Snapshot views read the camera in this browser and upload frames.
