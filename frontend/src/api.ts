@@ -13,6 +13,10 @@
 // HTTPS, otherwise the browser blocks the request as mixed content.
 const API_BASE: string = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')
 
+// Backend on another host (e.g. a cloud server): it has no microscope, so
+// the Live / Snapshot views read the camera in this browser and upload frames.
+export const REMOTE_BACKEND = API_BASE !== ''
+
 function api(path: string): string {
   return `${API_BASE}${path}`
 }

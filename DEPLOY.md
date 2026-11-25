@@ -1,140 +1,119 @@
-# Deployment — Static UI on Vercel + local backend
+# Deployment — UI on Vercel, backend on your PC
 
-The frontend ships to Vercel as a static SPA. The backend (PyTorch +
-YOLOv9 + OpenCV + camera access) stays on a machine you control and is
-exposed over HTTPS via a tunnel. This is the only architecture that
-both fits Vercel and preserves the parts of this app that need a real
-process (live USB stream, training, dataset persistence).
+The React UI is a static site on Vercel. The backend (PyTorch + YOLOv9 /
+RF-DETR, training, the dataset) runs on a computer you control — ideally one
+with an NVIDIA GPU — and is reached over HTTPS through a tunnel. Any device
+(e.g. the Raspberry Pi with the microscope) just opens the Vercel link.
 
 ```
-┌────────────────────┐     HTTPS API calls         ┌─────────────────────┐
-│  React UI          │ ─────────────────────────►  │  Cloudflare Tunnel  │
-│  https://<x>.vercel│                             │  / ngrok            │
-└────────────────────┘                             └──────────┬──────────┘
-                                                              │
-                                                              ▼
-                                                    ┌─────────────────────┐
-                                                    │  uvicorn :8003      │
-                                                    │  (your laptop / Pi) │
-                                                    └─────────────────────┘
+ Pi / laptop / phone                     Vercel                 your PC
+┌──────────────────────┐   page   ┌────────────────────┐
+│ browser + microscope │ ◄─────── │ static React UI    │
+│ (getUserMedia)       │          └────────────────────┘
+│                      │  HTTPS /api/*   ┌──────────────────┐   ┌──────────────┐
+│                      │ ──────────────► │ Tailscale Funnel │ ─►│ uvicorn :8003│
+└──────────────────────┘  frames, boxes  │ https://…ts.net  │   │ (GPU)        │
+                                         └──────────────────┘   └──────────────┘
 ```
+
+When the UI is built with `VITE_API_BASE_URL` (i.e. on Vercel), the Live
+tab and the Label tab's Snapshot read the camera **of the device viewing the
+page** and upload frames to the backend; boxes are drawn in the browser. The
+backend's own camera is not used.
 
 ---
 
 ## One-time setup
 
-### 1. Deploy the frontend to Vercel
+### 1. Give the PC a fixed HTTPS address (Tailscale Funnel, free)
 
-The repo root has a `vercel.json` that tells Vercel to build inside
-`frontend/` and serve the `dist/` output. From a fresh Vercel project:
-
-1. Import the repo on <https://vercel.com/new>.
-2. Leave **Root Directory** at the repo root (the `vercel.json` handles
-   the rest).
-3. Under **Environment Variables**, set:
-
-   | Name | Value | Notes |
-   |---|---|---|
-   | `VITE_API_BASE_URL` | `https://<your-tunnel>.trycloudflare.com` | Has to be HTTPS. See step 2 for getting one. |
-
-4. Click **Deploy**. First deploy will fail to *function* until step 2
-   is done, but the build itself should succeed.
-
-> When you change `VITE_API_BASE_URL`, click **Redeploy** — Vite bakes
-> env vars into the bundle at build time, not at runtime.
-
-### 2. Expose your local backend over HTTPS
-
-Browsers refuse to call plain HTTP from an HTTPS page. Two easy
-options — both give you a public HTTPS URL pointing at
-`http://localhost:8003`.
-
-#### Cloudflare Tunnel (recommended — free, persistent URL possible)
-
-```bash
-# install once
-brew install cloudflared           # macOS
-# or:   sudo apt install cloudflared   # Debian/Ubuntu
-# or:   winget install Cloudflare.cloudflared   # Windows
-
-# quick start (ephemeral URL; changes every restart)
-cloudflared tunnel --url http://localhost:8003
+```powershell
+winget install --id Tailscale.Tailscale     # then sign in from the tray icon
+tailscale funnel --bg 8003
 ```
 
-It prints something like
-`https://abc-thing-xyz-123.trycloudflare.com` — that's your
-`VITE_API_BASE_URL`. Paste it into Vercel, redeploy.
+The first `funnel` run prints a link to enable HTTPS/Funnel for your
+tailnet — open it, enable, run the command again. It then prints the
+address, e.g. `https://my-pc.tail1234.ts.net`. `--bg` keeps the Funnel
+across reboots, so the address never changes.
 
-For a stable URL that survives reboots, follow
-<https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/>.
+### 2. Point the Vercel project at it
 
-#### ngrok (one-command, ephemeral)
+The repo-root `vercel.json` builds `frontend/` into `frontend/dist`. In the
+Vercel project → **Settings → Environment Variables**:
+
+| Name | Value |
+|---|---|
+| `VITE_API_BASE_URL` | `https://my-pc.tail1234.ts.net` (no trailing slash) |
+
+Then **Deployments → ⋯ → Redeploy**. Vite bakes the variable into the
+bundle at build time, so changing it always needs a redeploy.
+
+### 3. Stop the Pi's own backend (if you installed the service)
 
 ```bash
-ngrok http 8003
+sudo systemctl disable --now ecoli-backend
 ```
 
-Use the `https://...ngrok-free.app` URL it prints. Free accounts get a
-new URL every restart.
-
-### 3. Allow the Vercel origin through CORS
-
-On the machine running the backend:
-
-```bash
-# Linux / macOS
-export CORS_ORIGINS="https://your-app.vercel.app"
-
-# Windows PowerShell
-$env:CORS_ORIGINS = "https://your-app.vercel.app"
-```
-
-Then start the backend as usual (`./start.sh`, `uvicorn ...`, `run.bat`,
-etc.). The backend reads `CORS_ORIGINS` (comma-separated) at startup
-and uses local-dev defaults if it's unset, so this is a no-op for
-development.
+The Pi only runs a browser now.
 
 ---
 
-## What works after this is set up
+## Every time
 
-| Feature | Works on Vercel-hosted UI? | Notes |
-|---|---|---|
-| Upload tab — image → predict | ✓ | Image bytes travel through the tunnel to your backend. |
-| Label tab — drawing + save | ✓ | Saves to the labelling host's filesystem (your machine, not Vercel). |
-| Label tab — snapshot from microscope | ✓ * | Captures from the microscope plugged into your *backend host*, not the visitor's webcam. |
-| Live Stream tab | ✓ * | MJPEG streams over the tunnel. Watch your upload bandwidth. |
-| Train tab | ✓ * | Runs on the backend host's CPU/GPU. |
+On the PC, start the backend and allow your Vercel origin (CORS):
 
-*"Works" assumes the backend is running while someone visits the UI.
-If you close your laptop, the UI loads but every API call fails until
-you bring the backend back up.
+```powershell
+deploy\serve-pc.bat https://YOUR-APP.vercel.app
+```
+
+(or once `setx CORS_ORIGINS https://YOUR-APP.vercel.app`, then just
+`deploy\serve-pc.bat`). It listens on 127.0.0.1 only; the Funnel is the
+public door. Keep the PC awake and plugged in.
+
+On the Pi, open `https://YOUR-APP.vercel.app` in Chromium, allow the camera
+when asked, go to **Live stream**, pick the microscope under **Camera**, Start.
 
 ---
 
-## What doesn't work and how to know
+## What works through the Vercel link
 
-| Symptom in the browser | Likely cause | Fix |
+| Feature | Notes |
+|---|---|
+| Upload tab — image → predict | Image goes to the PC; boxes come back. |
+| Live stream | Video plays locally from the viewer's camera; frames (≤960 px) go to the PC, boxes refresh as fast as the round trip allows. "Min confidence" applies instantly. |
+| Capture & label / Snapshot | Grabs a full-resolution frame from the viewer's camera. |
+| Label tab — save | Saved on the PC's disk (`data/ecoli/`). |
+| Train tab | Runs on the PC's GPU. |
+
+If the PC or the backend is off, the page loads but every API call fails.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
 |---|---|---|
-| `Failed to fetch` on /api/health | Tunnel not running, or backend not running | Start `cloudflared tunnel --url http://localhost:8003` and the backend |
-| `Mixed content blocked` warning | `VITE_API_BASE_URL` is `http://`, UI is `https://` | Use a tunnel URL (HTTPS) |
-| `CORS error` in console | Vercel origin not in `CORS_ORIGINS` | Set `CORS_ORIGINS=https://your-app.vercel.app` on the backend host, restart |
-| API works but very slow on /api/predict | Image uploads + tunnel = round-trip over your home upload bandwidth | Expected for now; not a Vercel issue |
+| Status badge shows an error / `Failed to fetch` | Backend or Funnel not running | `deploy\serve-pc.bat …`; `tailscale funnel status` |
+| `CORS error` in the console | Vercel origin not allowed | Pass the exact `https://YOUR-APP.vercel.app` to `serve-pc.bat` |
+| `Mixed content blocked` | `VITE_API_BASE_URL` is `http://` | Use the Funnel's `https://` address, redeploy |
+| "Camera permission was denied" | Chromium blocked the camera | Click the camera icon in the address bar → Allow, reload |
+| "No camera found" | Microscope not detected by the viewer's device | Replug it; check `ls /dev/video*` on the Pi |
+
+**No Tailscale?** `cloudflared tunnel --url http://localhost:8003` gives an
+HTTPS address without an account, but it changes on every start, so you'd
+update `VITE_API_BASE_URL` and redeploy each time. Avoid free ngrok: its
+browser-warning page breaks the API calls.
 
 ---
 
 ## Going back to fully local
 
-Nothing in this guide breaks the local single-process mode. Leaving
-`VITE_API_BASE_URL` empty makes every fetch a same-origin `/api/*`
-call. So:
+Leaving `VITE_API_BASE_URL` empty makes every fetch a same-origin `/api/*`
+call and the Live tab uses the backend's camera (`source` 0, 1, …):
 
 ```powershell
-# Windows local (single process)
 cd frontend; npm run build; cd ..    # writes to backend/app/static/
 $env:ECOLI_CONFIG = "config.yaml"
-uvicorn backend.app.main:app --port 8003
+.venv\Scripts\python -m uvicorn backend.app.main:app --port 8003
 ```
 
-still works exactly as before. The vite build detects `VERCEL=1` only
-when Vercel is the one running it.
+The vite build writes to `dist/` only when Vercel (`VERCEL=1`) runs it.

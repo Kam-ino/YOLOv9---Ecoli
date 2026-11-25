@@ -14,6 +14,7 @@ import {
   predict,
   saveDatasetEntry,
   streamUrl,
+  REMOTE_BACKEND,
   type DatasetEntry,
   type DatasetStats,
   type LabelBox,
@@ -24,6 +25,7 @@ import LabelCanvas from './LabelCanvas'
 import TrainPanel from './TrainPanel'
 import AlgorithmToggle from './AlgorithmToggle'
 import { useAlgorithm } from './useAlgorithm'
+import { CameraPicker, CameraView, grabFrame, useCamera } from './camera'
 
 type SourceMode = 'upload' | 'snapshot'
 
@@ -87,6 +89,11 @@ export default function LabelView() {
   // this lets them re-pick the same file, which the input otherwise
   // ignores because onChange doesn't fire for the same selection).
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Remote backend: the snapshot preview is this browser's camera, open only
+  // while the preview shows (grabbing a frame releases the device).
+  const cam = useCamera(REMOTE_BACKEND && sourceMode === 'snapshot' && !imageUrl)
+  const previewReady = REMOTE_BACKEND ? cam.stream !== null : liveReady
 
   // ---- bootstrap ----------------------------------------------------------
   useEffect(() => {
@@ -165,6 +172,12 @@ export default function LabelView() {
   // annotate=false, so the captured frame is raw (no boxes/HUD baked in).
   const onCaptureFromLive = useCallback(() => {
     setError(null); setMessage(null)
+    if (REMOTE_BACKEND) {
+      grabFrame(cam.videoRef.current, Infinity, 'image/png')
+        .then((blob) => setSource(blob, null))
+        .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      return
+    }
     const img = liveImgRef.current
     if (!img || !img.naturalWidth || !img.naturalHeight) {
       setError('Live feed not ready yet — give it a moment to connect.')
@@ -180,7 +193,7 @@ export default function LabelView() {
       if (blob) setSource(blob, null)
       else setError('Could not capture the current frame.')
     }, 'image/png')
-  }, [setSource])
+  }, [setSource, cam.videoRef])
 
   // (Re)connect the live preview whenever we enter snapshot mode or the
   // source changes, resetting the per-connection ready / error flags.
@@ -197,7 +210,7 @@ export default function LabelView() {
   // chord (so Ctrl/Cmd+P → print still works).
   useEffect(() => {
     const canCapture =
-      sourceMode === 'snapshot' && !imageUrl && liveReady
+      sourceMode === 'snapshot' && !imageUrl && previewReady
     if (!canCapture) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'p' && e.key !== 'P') return
@@ -211,7 +224,7 @@ export default function LabelView() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [sourceMode, imageUrl, liveReady, onCaptureFromLive])
+  }, [sourceMode, imageUrl, previewReady, onCaptureFromLive])
 
   const onDeleteBox = useCallback((idx: number) => {
     setBoxes((prev) => prev.filter((_, i) => i !== idx))
@@ -418,16 +431,20 @@ export default function LabelView() {
           />
         ) : (
           <>
-            <input
-              type="text"
-              value={snapshotSource}
-              onChange={(e) => setSnapshotSource(e.target.value)}
-              placeholder="0 or path/to/file.mp4"
-              style={{ width: 240 }}
-            />
+            {REMOTE_BACKEND ? (
+              <CameraPicker cam={cam} disabled={busy} />
+            ) : (
+              <input
+                type="text"
+                value={snapshotSource}
+                onChange={(e) => setSnapshotSource(e.target.value)}
+                placeholder="0 or path/to/file.mp4"
+                style={{ width: 240 }}
+              />
+            )}
             <button
               onClick={onCaptureFromLive}
-              disabled={busy || !snapshotSource.trim() || !liveReady}
+              disabled={busy || (!REMOTE_BACKEND && !snapshotSource.trim()) || !previewReady}
             >
               Capture frame
             </button>
@@ -513,6 +530,21 @@ export default function LabelView() {
                 if (orig) onDeleteBox(orig.idx)
               }}
             />
+          ) : sourceMode === 'snapshot' && REMOTE_BACKEND ? (
+            <div className="live-preview">
+              {cam.error ? (
+                <div className="placeholder"><p className="error">{cam.error}</p></div>
+              ) : (
+                <>
+                  <CameraView cam={cam} />
+                  <p className="muted small">
+                    {previewReady
+                      ? 'Live feed — click "Capture frame" or press P to grab the current frame for labelling.'
+                      : 'Connecting to the camera…'}
+                  </p>
+                </>
+              )}
+            </div>
           ) : sourceMode === 'snapshot' && snapshotSource.trim() ? (
             <div className="live-preview">
               {liveError ? (

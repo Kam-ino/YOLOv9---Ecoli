@@ -8,10 +8,13 @@ import {
   detectionsToLabelBoxes,
   colorForClass,
   SPLITS,
+  REMOTE_BACKEND,
+  type Detection,
   type LabelBox,
   type Split,
 } from './api'
 import type { Algorithm } from './api'
+import { CameraPicker, CameraView, grabFrame, useCamera } from './camera'
 import AlgorithmToggle from './AlgorithmToggle'
 import { useAlgorithm } from './useAlgorithm'
 import LabelCanvas from './LabelCanvas'
@@ -37,6 +40,13 @@ async function snapshotWithRetry(
   }
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
 }
+
+// Remote backend: long side of the frames sent for live detection. Bigger
+// frames get tiled (~7 passes), i.e. seconds per refresh on a free CPU.
+// ponytail: fixed size; "Capture & label" sends full resolution.
+const LIVE_MAX_SIDE = 960
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 // Live MJPEG stream pulled from /api/stream. The browser handles
 // multipart/x-mixed-replace in <img> natively. Cache-bust forces a
@@ -82,6 +92,42 @@ export default function LiveView() {
   const [split, setSplit] = useState<Split>('train')
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
 
+  // ---- remote backend: camera in this browser, boxes drawn client-side ----
+  const cam = useCamera(REMOTE_BACKEND && running && !editing)
+  const [dets, setDets] = useState<Detection[]>([])
+  const [frameSize, setFrameSize] = useState<[number, number] | null>(null)
+  const [roundTripMs, setRoundTripMs] = useState<number | null>(null)
+
+  // Send the newest frame as soon as the previous answer is back (one
+  // request in flight), so the refresh rate follows the server's speed.
+  // Paused while capturing so the two requests don't compete.
+  useEffect(() => {
+    if (!REMOTE_BACKEND || !cam.stream || busy) return
+    let stopped = false
+    ;(async () => {
+      while (!stopped) {
+        const video = cam.videoRef.current
+        if (!video?.videoWidth) { await sleep(200); continue }
+        const t0 = performance.now()
+        try {
+          const blob = await grabFrame(video, LIVE_MAX_SIDE)
+          const res = await predict(new File([blob], 'frame.jpg', { type: 'image/jpeg' }), { algorithm })
+          if (stopped) break
+          setDets(res.detections)
+          setFrameSize(res.image_size)
+          setRoundTripMs(performance.now() - t0)
+          setError(null)
+        } catch (e) {
+          if (stopped) break
+          // e.g. the free server is waking up: show it, retry gently.
+          setError(e instanceof Error ? e.message : String(e))
+          await sleep(2000)
+        }
+      }
+    })()
+    return () => { stopped = true }
+  }, [cam.stream, cam.videoRef, busy, algorithm])
+
   // Labelling vocabulary for the class selector + canvas labels.
   useEffect(() => {
     fetchLabelClasses().then(setClasses).catch(() => {})
@@ -99,11 +145,14 @@ export default function LiveView() {
     setBust((b) => b + 1)
     setRunning(true)
   }
-  const stop = () => setRunning(false)
+  const stop = () => {
+    setRunning(false)
+    setDets([]); setFrameSize(null); setRoundTripMs(null)
+  }
 
   // True while the confidence slider or detector differs from what the
   // stream is currently using — i.e. a reconnect is pending.
-  const settingsDirty = running && (minConf !== appliedConf || algorithm !== appliedAlgo)
+  const settingsDirty = !REMOTE_BACKEND && running && (minConf !== appliedConf || algorithm !== appliedAlgo)
 
   // While running, debounce slider changes into the stream URL: 350ms
   // after the last adjustment, reconnect with the new threshold. The
@@ -122,15 +171,17 @@ export default function LiveView() {
   const captureForLabel = useCallback(async () => {
     setError(null); setSaveMsg(null); setBusy(true)
     try {
-      const blob = await snapshotWithRetry(source)
+      const blob = REMOTE_BACKEND
+        ? await grabFrame(cam.videoRef.current, Infinity, 'image/png')
+        : await snapshotWithRetry(source)
       const file = new File([blob], 'frame.jpg', {
         type: blob.type || 'image/jpeg',
       })
       let boxes: LabelBox[] = []
       try {
-        // preprocess=false → the snapshot is already CLAHE-enhanced, so
-        // don't let predict apply CLAHE a second time.
-        const res = await predict(file, { preprocess: false, algorithm })
+        // Server snapshots are already CLAHE-enhanced (preprocess=false so
+        // it isn't applied twice); browser frames are raw.
+        const res = await predict(file, { preprocess: REMOTE_BACKEND, algorithm })
         // Only pre-fill detections that pass the Min confidence slider —
         // same threshold the live overlay uses. Without this the canvas
         // floods with every weak box down to the model's 0.01 floor.
@@ -151,7 +202,7 @@ export default function LiveView() {
     } finally {
       setBusy(false)
     }
-  }, [source, editUrl, minConf, algorithm])
+  }, [source, editUrl, minConf, algorithm, cam.videoRef])
 
   const deleteBox = useCallback((idx: number) => {
     setEditBoxes((prev) => prev.filter((_, i) => i !== idx))
@@ -285,18 +336,22 @@ export default function LiveView() {
   return (
     <div className="live-view">
       <div className="live-controls">
-        <label>
-          <span>Source</span>
-          <input
-            type="text"
-            value={source}
-            onChange={(e) => setSource(e.target.value)}
-            placeholder="0, 1, or path/to/file.mp4"
-            disabled={running}
-          />
-        </label>
+        {REMOTE_BACKEND ? (
+          <CameraPicker cam={cam} disabled={busy} />
+        ) : (
+          <label>
+            <span>Source</span>
+            <input
+              type="text"
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+              placeholder="0, 1, or path/to/file.mp4"
+              disabled={running}
+            />
+          </label>
+        )}
         <AlgorithmToggle value={algorithm} onChange={setAlgorithm} disabled={busy} />
-        <label className="conf-filter">
+        {!REMOTE_BACKEND && <label className="conf-filter">
           <span>Infer every <strong>{inferEvery}</strong></span>
           <input
             type="range" min={1} max={10} step={1}
@@ -304,7 +359,7 @@ export default function LiveView() {
             onChange={(e) => setInferEvery(parseInt(e.target.value, 10))}
             disabled={running}
           />
-        </label>
+        </label>}
         <label className="conf-filter">
           <span>
             Min confidence <strong>{minConf.toFixed(2)}</strong>
@@ -321,7 +376,7 @@ export default function LiveView() {
         {running ? (
           <button onClick={stop}>Stop</button>
         ) : (
-          <button onClick={start} disabled={!source.trim() || busy}>Start</button>
+          <button onClick={start} disabled={(!REMOTE_BACKEND && !source.trim()) || busy}>Start</button>
         )}
         {running && (
           <button
@@ -333,11 +388,32 @@ export default function LiveView() {
             {busy ? 'Capturing…' : 'Capture & label'}
           </button>
         )}
-        {error && <span className="error">{error}</span>}
+        {REMOTE_BACKEND && running && roundTripMs != null && (
+          <span className="muted small">Boxes refresh every {(roundTripMs / 1000).toFixed(1)} s</span>
+        )}
+        {(error || cam.error) && <span className="error">{error || cam.error}</span>}
       </div>
 
       <div className="image-pane">
-        {busy ? (
+        {REMOTE_BACKEND ? (
+          running ? (
+            <CameraView
+              cam={cam}
+              detections={dets.filter((d) => d.confidence >= minConf)}
+              frameSize={frameSize}
+            />
+          ) : (
+            <div className="placeholder">
+              <p>Pick the microscope under <strong>Camera</strong> and press Start.</p>
+              <p className="muted small">
+                The video plays from this device; detection runs on the server, so
+                the boxes refresh about once a second. "Min confidence" applies
+                instantly. Use "Capture &amp; label" to save a frame with its
+                detections as training data.
+              </p>
+            </div>
+          )
+        ) : busy ? (
           <div className="placeholder"><p>Capturing a clean frame…</p></div>
         ) : running ? (
           <img
